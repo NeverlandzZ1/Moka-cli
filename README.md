@@ -20,7 +20,7 @@
 npm install -g @jackwener/opencli@1.8.6
 npm install
 npm run check
-opencli plugin install "D:\Users\jingboma\proj\bossHr\Moka-transcript-getter"
+opencli plugin install .
 ```
 
 ## HR 使用流程

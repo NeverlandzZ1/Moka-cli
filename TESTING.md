@@ -5,7 +5,7 @@
 ## 1. 进入项目
 
 ```powershell
-cd D:\Users\jingboma\proj\bossHr\Moka-transcript-getter
+Set-Location "<插件仓库目录>"
 ```
 
 检查运行环境：
@@ -39,7 +39,7 @@ npm run check
 安装本地 OpenCLI 插件：
 
 ```powershell
-opencli plugin install "D:\Users\jingboma\proj\bossHr\Moka-transcript-getter"
+opencli plugin install .
 ```
 
 确认插件存在：
@@ -53,7 +53,7 @@ opencli plugin list -f json
 ```json
 {
   "name": "moka-transcripts",
-  "source": "local:D:\\Users\\jingboma\\proj\\bossHr\\Moka-transcript-getter"
+  "source": "local:<插件仓库绝对路径>"
 }
 ```
 
@@ -78,7 +78,7 @@ npm run check
 
 ```text
 Test Files  5 passed
-Tests       10 passed
+Tests       12 passed
 moka.js 构建成功
 ```
 
@@ -111,7 +111,7 @@ opencli plugin list -f json
 插件确实不存在时，再重新安装：
 
 ```powershell
-opencli plugin install "D:\Users\jingboma\proj\bossHr\Moka-transcript-getter"
+opencli plugin install .
 npm install
 ```
 
@@ -338,9 +338,11 @@ opencli moka transcript `
 不要直接从今日全量导出开始。先测试一个今天有面试的候选人：
 
 ```powershell
+$debugOutput = Join-Path ([System.IO.Path]::GetTempPath()) "moka-debug-candidate.json"
+
 opencli moka export-transcripts `
   --candidate "<今天候选人姓名>" `
-  --output "D:\tmp\moka-debug-candidate.json" `
+  --output $debugOutput `
   -f json `
   -v
 ```
@@ -348,7 +350,7 @@ opencli moka export-transcripts `
 查看文件：
 
 ```powershell
-Get-Content -Raw -Encoding utf8 "D:\tmp\moka-debug-candidate.json"
+Get-Content -Raw -Encoding utf8 $debugOutput
 ```
 
 重点检查输出结构：
@@ -382,8 +384,10 @@ Get-Content -Raw -Encoding utf8 "D:\tmp\moka-debug-candidate.json"
 小范围导出确认无误后，再执行：
 
 ```powershell
+$output = Join-Path ([System.IO.Path]::GetTempPath()) "moka-transcripts.json"
+
 opencli moka export-transcripts `
-  --output "D:\tmp\moka-transcripts.json" `
+  --output $output `
   -f json
 ```
 
@@ -397,7 +401,7 @@ opencli moka export-transcripts `
 完成后检查：
 
 ```powershell
-$result = Get-Content -Raw -Encoding utf8 "D:\tmp\moka-transcripts.json" | ConvertFrom-Json
+$result = Get-Content -Raw -Encoding utf8 $output | ConvertFrom-Json
 $result.stats | Format-List
 $result.errors | Format-List
 ```
@@ -406,10 +410,10 @@ $result.errors | Format-List
 
 ```powershell
 opencli moka export-transcripts `
-  --output "D:\tmp\moka-transcripts.json" `
+  --output $output `
   -f json
 
-$result = Get-Content -Raw -Encoding utf8 "D:\tmp\moka-transcripts.json" | ConvertFrom-Json
+$result = Get-Content -Raw -Encoding utf8 $output | ConvertFrom-Json
 $duplicates = $result.records |
   Group-Object { "$($_.applicationId):$($_.interviewId)" } |
   Where-Object Count -gt 1
@@ -422,7 +426,7 @@ $duplicates
 - 已存在的 `(applicationId, interviewId)` 被本次结果更新，数组位置不变。
 - 新的联合键追加到 `records` 末尾。
 - `stats` 按合并后的 `records` 重新计算，`errors` 反映本次导出错误。
-- Windows 的 `D:\moka-transcripts.json`、普通子目录以及 macOS/Linux 绝对路径均可作为输出位置；已经存在的父目录不会重复执行 `mkdir`。
+- Windows 盘符根目录、普通子目录以及 macOS/Linux 绝对路径均可作为输出位置；已经存在的父目录不会重复执行 `mkdir`。
 
 ## 14. 调试时使用真实 Request Payload
 
@@ -533,7 +537,7 @@ npm run check
 日常修改代码后，执行下面这组命令即可完成主要回归：
 
 ```powershell
-cd D:\Users\jingboma\proj\bossHr\Moka-transcript-getter
+Set-Location "<插件仓库目录>"
 
 npm run check
 
@@ -552,9 +556,11 @@ opencli moka interviews <真实applicationId> -f json -v
 ```powershell
 opencli moka transcript <真实applicationId> <真实interviewId> -f json -v
 
+$regressionOutput = Join-Path ([System.IO.Path]::GetTempPath()) "moka-regression.json"
+
 opencli moka export-transcripts `
   --candidate "<今天候选人姓名>" `
-  --output "D:\tmp\moka-regression.json" `
+  --output $regressionOutput `
   -f json `
   -v
 ```

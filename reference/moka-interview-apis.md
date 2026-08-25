@@ -106,7 +106,7 @@ https://app.mokahr.com/interviews/overview/application/{applicationId}/interview
 
 ```json
 {
-  "applicationIds": ["813749158"]
+  "applicationIds": ["123456789"]
 }
 ```
 
@@ -166,8 +166,8 @@ Content-Type: application/json
 
 ```json
 {
-  "applicationId": 813749158,
-  "interviewId": 48234890
+  "applicationId": 123456789,
+  "interviewId": 98765432
 }
 ```
 
@@ -242,8 +242,8 @@ Content-Type: application/json
 
 ```json
 {
-  "applicationId": 813749158,
-  "interviewId": 48234890,
+  "applicationId": 123456789,
+  "interviewId": 98765432,
   "candidateName": "候选人姓名",
   "jobTitle": "岗位名称",
   "interviewerNames": ["面试官 A", "面试官 B"],
