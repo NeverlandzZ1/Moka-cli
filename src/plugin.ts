@@ -74,6 +74,7 @@ cli({
       ...status,
       launched: launch.launched,
       reusedMokaTab: launch.reusedMokaTab,
+      refreshedAfterLaunch: launch.refreshedAfterLaunch,
       cdpEndpoint: launch.endpoint,
       profileDir: launch.profileDir,
     }];
@@ -136,7 +137,7 @@ cli({
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page) => {
       const application: ApplicationRecord = {
-        applicationId: idArg(kwargs.applicationId, 'application-id'),
+        applicationId: idArg(kwargs['application-id'], 'application-id'),
         candidateName: '',
         jobTitle: '',
       };
@@ -162,12 +163,12 @@ cli({
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page) => [{
-      applicationId: idArg(kwargs.applicationId, 'application-id'),
-      interviewId: idArg(kwargs.interviewId, 'interview-id'),
+      applicationId: idArg(kwargs['application-id'], 'application-id'),
+      interviewId: idArg(kwargs['interview-id'], 'interview-id'),
       ...await getMeetingSummary(
         page,
-        idArg(kwargs.applicationId, 'application-id'),
-        idArg(kwargs.interviewId, 'interview-id'),
+        idArg(kwargs['application-id'], 'application-id'),
+        idArg(kwargs['interview-id'], 'interview-id'),
       ),
     }],
   ),
@@ -193,10 +194,12 @@ cli({
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page, bridge) => {
       const result = await collectTranscripts(page, bridge, collectionOptions(kwargs));
-      const outputPath = typeof kwargs.output === 'string' && kwargs.output.trim()
+      const written = typeof kwargs.output === 'string' && kwargs.output.trim()
         ? writeCollection(kwargs.output.trim(), result)
         : undefined;
-      return { ...result, ...(outputPath ? { outputPath } : {}) };
+      return written
+        ? { ...written.result, outputPath: written.outputPath }
+        : result;
     },
   ),
 });

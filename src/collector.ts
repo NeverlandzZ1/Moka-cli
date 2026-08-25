@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { IPage } from '@jackwener/opencli/types';
 import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
-import type { CollectionResult, JsonRecord } from './types.js';
+import type { CollectionResult, JsonRecord, TranscriptRecord } from './types.js';
 import { getMeetingSummary, listApplications, listInterviews } from './moka-api.js';
 import { errorMessage } from './utils.js';
 
@@ -68,9 +68,66 @@ export async function collectTranscripts(
   };
 }
 
-export function writeCollection(outputPath: string, result: CollectionResult): string {
+function recordKey(record: Pick<TranscriptRecord, 'applicationId' | 'interviewId'>): string {
+  return `${String(record.applicationId)}:${String(record.interviewId)}`;
+}
+
+function readExistingCollection(path: string): CollectionResult | undefined {
+  if (!existsSync(path)) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`已有导出文件不是有效 JSON，已停止写入以避免覆盖：${path}（${errorMessage(error)}）`);
+  }
+  if (
+    typeof parsed !== 'object'
+    || parsed === null
+    || !Array.isArray((parsed as Partial<CollectionResult>).records)
+  ) {
+    throw new Error(`已有导出文件缺少 records 数组，已停止写入以避免覆盖：${path}`);
+  }
+  return parsed as CollectionResult;
+}
+
+export function mergeCollections(
+  existing: CollectionResult | undefined,
+  latest: CollectionResult,
+): CollectionResult {
+  const records = new Map<string, TranscriptRecord>();
+  for (const record of existing?.records ?? []) records.set(recordKey(record), record);
+  // Map.set updates an existing pair without moving it; unseen interviews append.
+  for (const record of latest.records) records.set(recordKey(record), record);
+  const mergedRecords = [...records.values()];
+  const applicationIds = new Set(mergedRecords.map((record) => String(record.applicationId)));
+  for (const error of latest.errors) {
+    if (error.applicationId !== undefined) applicationIds.add(String(error.applicationId));
+  }
+  return {
+    generatedAt: latest.generatedAt,
+    source: latest.source,
+    records: mergedRecords,
+    errors: latest.errors,
+    stats: {
+      applications: applicationIds.size,
+      interviews: mergedRecords.length,
+      transcriptsAvailable: mergedRecords.filter((item) => item.transcriptStatus === 'available').length,
+      transcriptsUnavailable: mergedRecords.filter((item) => item.transcriptStatus === 'not_available').length,
+      errors: latest.errors.length,
+    },
+  };
+}
+
+export function writeCollection(
+  outputPath: string,
+  latest: CollectionResult,
+): { outputPath: string; result: CollectionResult } {
   const absolutePath = resolve(outputPath);
-  mkdirSync(dirname(absolutePath), { recursive: true });
+  const parentDirectory = dirname(absolutePath);
+  // Windows drive roots (D:\) and POSIX root (/) already exist and should not
+  // be passed to mkdirSync, which can raise EPERM on some Windows setups.
+  if (!existsSync(parentDirectory)) mkdirSync(parentDirectory, { recursive: true });
+  const result = mergeCollections(readExistingCollection(absolutePath), latest);
   writeFileSync(absolutePath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
-  return absolutePath;
+  return { outputPath: absolutePath, result };
 }

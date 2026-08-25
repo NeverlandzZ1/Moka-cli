@@ -49,6 +49,14 @@ opencli moka status -f json
 opencli moka export-transcripts --output ".\moka-transcripts.json" -f json
 ```
 
+macOS/Linux 可使用：
+
+```bash
+opencli moka export-transcripts --output "$PWD/moka-transcripts.json" -f json
+```
+
+输出目录已兼容 Windows 盘符根目录、Windows 普通目录和 macOS/Linux 路径。若目标 JSON 已存在，不会整体覆盖旧数据：以 `(applicationId, interviewId)` 为联合键更新已有面试，并将新面试追加到 `records`；`generatedAt`、`source`、`errors` 和 `stats` 更新为合并后的最新值。若已有文件不是有效导出 JSON，命令会停止写入，避免破坏原文件。
+
 也可以只导出某位候选人：
 
 ```powershell
@@ -71,6 +79,8 @@ opencli moka export-transcripts --candidate "候选人姓名" --output ".\候选
 默认只发现“今天”的面试，不请求历史或未来：范围按北京时间动态计算，按开始时间升序，并自动遍历今天的全部分页。结果按 `applicationId` 去重；随后每个唯一应聘记录只调用一次 `interviewCard`，由该接口返回这条应聘记录至今的全部面试。只有显式传入高级调试参数 `--request-json` 时，才会按照用户提供的单一查询执行。
 
 重复执行 `opencli moka login` 时会优先复用并聚焦已经打开的 Moka 总览页或登录页，不会为每次状态检查重复创建 Moka 标签页。只有当前 CDP Chrome 中完全没有 Moka 页面时才新建标签页。
+
+仅当 `login` 本次确实新启动了专用 Chrome 时，插件会等待 Moka 首次加载约 1.5 秒，然后使用已有缓存自动刷新一次，以改善冷 Profile 未登录页面首次打开缓慢的问题。复用现有 Chrome、已登录页面以及后续数据命令都不会触发刷新。返回值中的 `refreshedAfterLaunch` 表示本次是否完成了这次补刷新。
 
 ## 当前 OpenCLI 兼容方式
 

@@ -48,17 +48,51 @@ async function bringTargetToFront(target: ChromeTarget): Promise<void> {
   }
 }
 
-async function openOrReuseCdpTab(endpoint: string, url: string): Promise<boolean> {
-  const targetsResponse = await fetch(`${endpoint}/json`, {
+async function readCdpTargets(endpoint: string): Promise<ChromeTarget[]> {
+  const response = await fetch(`${endpoint}/json`, {
     signal: AbortSignal.timeout(3_000),
   });
-  if (targetsResponse.ok) {
-    const targets = await targetsResponse.json();
-    const existing = selectReusableMokaTarget(Array.isArray(targets) ? targets : []);
-    if (existing) {
-      await bringTargetToFront(existing);
-      return true;
+  if (!response.ok) return [];
+  const targets = await response.json();
+  return Array.isArray(targets) ? targets : [];
+}
+
+async function reloadMokaOnceAfterLaunch(endpoint: string): Promise<boolean> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const initial = selectReusableMokaTarget(await readCdpTargets(endpoint).catch(() => []));
+    if (!initial) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      continue;
     }
+
+    // Give the cold profile a moment to populate its HTTP cache, then perform
+    // the same one-time refresh that makes Moka's first unauthenticated load recover.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const target = selectReusableMokaTarget(await readCdpTargets(endpoint).catch(() => []));
+    if (!target?.webSocketDebuggerUrl) continue;
+
+    const bridge = new CDPBridge();
+    try {
+      await bridge.connect({ cdpEndpoint: target.webSocketDebuggerUrl, timeout: 5 });
+      await bridge.send('Page.reload', { ignoreCache: false });
+      await bridge.send('Page.bringToFront');
+      return true;
+    } catch {
+      // A redirect can replace the target while Chrome is starting. Retry until
+      // the deadline instead of making login fail because the optional refresh failed.
+    } finally {
+      await bridge.close().catch(() => undefined);
+    }
+  }
+  return false;
+}
+
+async function openOrReuseCdpTab(endpoint: string, url: string): Promise<boolean> {
+  const existing = selectReusableMokaTarget(await readCdpTargets(endpoint));
+  if (existing) {
+    await bringTargetToFront(existing);
+    return true;
   }
 
   const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(url)}`, {
@@ -105,12 +139,19 @@ export async function ensureChromeWithCdp(options: ChromeLaunchOptions): Promise
   launched: boolean;
   profileDir: string;
   reusedMokaTab: boolean;
+  refreshedAfterLaunch: boolean;
 }> {
   const endpoint = `http://127.0.0.1:${options.port}`;
   const profileDir = options.profileDir || defaultProfileDir();
-  if (await probeCDP(options.port, 800)) {
+  if (await probeCDP(options.port, 2_000)) {
     const reusedMokaTab = await openOrReuseCdpTab(endpoint, options.url);
-    return { endpoint, launched: false, profileDir, reusedMokaTab };
+    return {
+      endpoint,
+      launched: false,
+      profileDir,
+      reusedMokaTab,
+      refreshedAfterLaunch: false,
+    };
   }
 
   const executable = findChromeExecutable(options.chromePath);
@@ -127,7 +168,14 @@ export async function ensureChromeWithCdp(options: ChromeLaunchOptions): Promise
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if (await probeCDP(options.port, 800)) {
-      return { endpoint, launched: true, profileDir, reusedMokaTab: false };
+      const refreshedAfterLaunch = await reloadMokaOnceAfterLaunch(endpoint);
+      return {
+        endpoint,
+        launched: true,
+        profileDir,
+        reusedMokaTab: false,
+        refreshedAfterLaunch,
+      };
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }

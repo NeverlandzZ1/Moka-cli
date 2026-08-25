@@ -126,7 +126,8 @@ opencli moka login -f json
 1. 启动或复用 CDP 端口为 `9222` 的 Chrome。
 2. 已有 Moka 总览页或登录页时，直接复用并聚焦，不重复打开标签页。
 3. 没有 Moka 页面时才打开 `https://app.mokahr.com/interviews/overview`。
-4. 未登录时进入 Moka 登录页。
+4. 本次新启动 Chrome 时，等待首次加载约 1.5 秒并自动刷新一次；复用 Chrome 时不刷新。
+5. 未登录时进入 Moka 登录页。
 
 未登录时的期望结果：
 
@@ -400,6 +401,28 @@ $result = Get-Content -Raw -Encoding utf8 "D:\tmp\moka-transcripts.json" | Conve
 $result.stats | Format-List
 $result.errors | Format-List
 ```
+
+再次使用同一个 `--output` 路径执行导出，验证增量合并：
+
+```powershell
+opencli moka export-transcripts `
+  --output "D:\tmp\moka-transcripts.json" `
+  -f json
+
+$result = Get-Content -Raw -Encoding utf8 "D:\tmp\moka-transcripts.json" | ConvertFrom-Json
+$duplicates = $result.records |
+  Group-Object { "$($_.applicationId):$($_.interviewId)" } |
+  Where-Object Count -gt 1
+$duplicates
+```
+
+通过标准：
+
+- `$duplicates` 没有输出。
+- 已存在的 `(applicationId, interviewId)` 被本次结果更新，数组位置不变。
+- 新的联合键追加到 `records` 末尾。
+- `stats` 按合并后的 `records` 重新计算，`errors` 反映本次导出错误。
+- Windows 的 `D:\moka-transcripts.json`、普通子目录以及 macOS/Linux 绝对路径均可作为输出位置；已经存在的父目录不会重复执行 `mkdir`。
 
 ## 14. 调试时使用真实 Request Payload
 

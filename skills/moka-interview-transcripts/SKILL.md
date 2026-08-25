@@ -25,6 +25,8 @@ description: 通过 Moka 专用 Chrome 登录会话查询或导出候选人、�
 - 查看某应聘记录的面试：`opencli moka interviews <applicationId> -f json`
 - 查看单场逐字稿：`opencli moka transcript <applicationId> <interviewId> -f json`
 
+重复导出到同一 JSON 路径以增量更新结果：命令按 `(applicationId, interviewId)` 更新重复面试并追加新面试，不要求 Agent 另行合并文件。不要用额外脚本覆盖或拼接导出 JSON。
+
 导出后检查 `stats` 和 `errors`。向用户报告输出路径、应聘记录数、面试数、成功取得的逐字稿数、暂无逐字稿数和错误数；有单项错误时保留已成功结果，不要把整个任务描述成失败。
 
 需要判断字段来源或排查接口变化时，读取 [Moka 接口说明](../../reference/moka-interview-apis.md)。

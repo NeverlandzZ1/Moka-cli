@@ -39,17 +39,43 @@ async function bringTargetToFront(target) {
     await bridge.close().catch(() => void 0);
   }
 }
-async function openOrReuseCdpTab(endpoint, url) {
-  const targetsResponse = await fetch(`${endpoint}/json`, {
+async function readCdpTargets(endpoint) {
+  const response = await fetch(`${endpoint}/json`, {
     signal: AbortSignal.timeout(3e3)
   });
-  if (targetsResponse.ok) {
-    const targets = await targetsResponse.json();
-    const existing = selectReusableMokaTarget(Array.isArray(targets) ? targets : []);
-    if (existing) {
-      await bringTargetToFront(existing);
-      return true;
+  if (!response.ok) return [];
+  const targets = await response.json();
+  return Array.isArray(targets) ? targets : [];
+}
+async function reloadMokaOnceAfterLaunch(endpoint) {
+  const deadline = Date.now() + 1e4;
+  while (Date.now() < deadline) {
+    const initial = selectReusableMokaTarget(await readCdpTargets(endpoint).catch(() => []));
+    if (!initial) {
+      await new Promise((resolve2) => setTimeout(resolve2, 300));
+      continue;
     }
+    await new Promise((resolve2) => setTimeout(resolve2, 1500));
+    const target = selectReusableMokaTarget(await readCdpTargets(endpoint).catch(() => []));
+    if (!target?.webSocketDebuggerUrl) continue;
+    const bridge = new CDPBridge();
+    try {
+      await bridge.connect({ cdpEndpoint: target.webSocketDebuggerUrl, timeout: 5 });
+      await bridge.send("Page.reload", { ignoreCache: false });
+      await bridge.send("Page.bringToFront");
+      return true;
+    } catch {
+    } finally {
+      await bridge.close().catch(() => void 0);
+    }
+  }
+  return false;
+}
+async function openOrReuseCdpTab(endpoint, url) {
+  const existing = selectReusableMokaTarget(await readCdpTargets(endpoint));
+  if (existing) {
+    await bringTargetToFront(existing);
+    return true;
   }
   const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(url)}`, {
     method: "PUT",
@@ -84,9 +110,15 @@ function findChromeExecutable(explicitPath) {
 async function ensureChromeWithCdp(options) {
   const endpoint = `http://127.0.0.1:${options.port}`;
   const profileDir = options.profileDir || defaultProfileDir();
-  if (await probeCDP(options.port, 800)) {
+  if (await probeCDP(options.port, 2e3)) {
     const reusedMokaTab = await openOrReuseCdpTab(endpoint, options.url);
-    return { endpoint, launched: false, profileDir, reusedMokaTab };
+    return {
+      endpoint,
+      launched: false,
+      profileDir,
+      reusedMokaTab,
+      refreshedAfterLaunch: false
+    };
   }
   const executable = findChromeExecutable(options.chromePath);
   mkdirSync(profileDir, { recursive: true });
@@ -101,7 +133,14 @@ async function ensureChromeWithCdp(options) {
   const deadline = Date.now() + 15e3;
   while (Date.now() < deadline) {
     if (await probeCDP(options.port, 800)) {
-      return { endpoint, launched: true, profileDir, reusedMokaTab: false };
+      const refreshedAfterLaunch = await reloadMokaOnceAfterLaunch(endpoint);
+      return {
+        endpoint,
+        launched: true,
+        profileDir,
+        reusedMokaTab: false,
+        refreshedAfterLaunch
+      };
     }
     await new Promise((resolve2) => setTimeout(resolve2, 300));
   }
@@ -309,7 +348,7 @@ async function discoverInterviewListPayload(page, bridge, timeoutSeconds = 15) {
 }
 
 // src/collector.ts
-import { mkdirSync as mkdirSync2, writeFileSync } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 // src/moka-api.ts
@@ -592,12 +631,53 @@ async function collectTranscripts(page, bridge, options = {}) {
     }
   };
 }
-function writeCollection(outputPath, result) {
+function recordKey(record) {
+  return `${String(record.applicationId)}:${String(record.interviewId)}`;
+}
+function readExistingCollection(path) {
+  if (!existsSync2(path)) return void 0;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`\u5DF2\u6709\u5BFC\u51FA\u6587\u4EF6\u4E0D\u662F\u6709\u6548 JSON\uFF0C\u5DF2\u505C\u6B62\u5199\u5165\u4EE5\u907F\u514D\u8986\u76D6\uFF1A${path}\uFF08${errorMessage(error)}\uFF09`);
+  }
+  if (typeof parsed !== "object" || parsed === null || !Array.isArray(parsed.records)) {
+    throw new Error(`\u5DF2\u6709\u5BFC\u51FA\u6587\u4EF6\u7F3A\u5C11 records \u6570\u7EC4\uFF0C\u5DF2\u505C\u6B62\u5199\u5165\u4EE5\u907F\u514D\u8986\u76D6\uFF1A${path}`);
+  }
+  return parsed;
+}
+function mergeCollections(existing, latest) {
+  const records = /* @__PURE__ */ new Map();
+  for (const record of existing?.records ?? []) records.set(recordKey(record), record);
+  for (const record of latest.records) records.set(recordKey(record), record);
+  const mergedRecords = [...records.values()];
+  const applicationIds = new Set(mergedRecords.map((record) => String(record.applicationId)));
+  for (const error of latest.errors) {
+    if (error.applicationId !== void 0) applicationIds.add(String(error.applicationId));
+  }
+  return {
+    generatedAt: latest.generatedAt,
+    source: latest.source,
+    records: mergedRecords,
+    errors: latest.errors,
+    stats: {
+      applications: applicationIds.size,
+      interviews: mergedRecords.length,
+      transcriptsAvailable: mergedRecords.filter((item) => item.transcriptStatus === "available").length,
+      transcriptsUnavailable: mergedRecords.filter((item) => item.transcriptStatus === "not_available").length,
+      errors: latest.errors.length
+    }
+  };
+}
+function writeCollection(outputPath, latest) {
   const absolutePath = resolve(outputPath);
-  mkdirSync2(dirname(absolutePath), { recursive: true });
+  const parentDirectory = dirname(absolutePath);
+  if (!existsSync2(parentDirectory)) mkdirSync2(parentDirectory, { recursive: true });
+  const result = mergeCollections(readExistingCollection(absolutePath), latest);
   writeFileSync(absolutePath, `${JSON.stringify(result, null, 2)}
 `, "utf8");
-  return absolutePath;
+  return { outputPath: absolutePath, result };
 }
 
 // src/plugin.ts
@@ -657,6 +737,7 @@ cli({
       ...status,
       launched: launch.launched,
       reusedMokaTab: launch.reusedMokaTab,
+      refreshedAfterLaunch: launch.refreshedAfterLaunch,
       cdpEndpoint: launch.endpoint,
       profileDir: launch.profileDir
     }];
@@ -716,7 +797,7 @@ cli({
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page) => {
       const application = {
-        applicationId: idArg(kwargs.applicationId, "application-id"),
+        applicationId: idArg(kwargs["application-id"], "application-id"),
         candidateName: "",
         jobTitle: ""
       };
@@ -741,12 +822,12 @@ cli({
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page) => [{
-      applicationId: idArg(kwargs.applicationId, "application-id"),
-      interviewId: idArg(kwargs.interviewId, "interview-id"),
+      applicationId: idArg(kwargs["application-id"], "application-id"),
+      interviewId: idArg(kwargs["interview-id"], "interview-id"),
       ...await getMeetingSummary(
         page,
-        idArg(kwargs.applicationId, "application-id"),
-        idArg(kwargs.interviewId, "interview-id")
+        idArg(kwargs["application-id"], "application-id"),
+        idArg(kwargs["interview-id"], "interview-id")
       )
     }]
   )
@@ -771,8 +852,8 @@ cli({
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page, bridge) => {
       const result = await collectTranscripts(page, bridge, collectionOptions(kwargs));
-      const outputPath = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result) : void 0;
-      return { ...result, ...outputPath ? { outputPath } : {} };
+      const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result) : void 0;
+      return written ? { ...written.result, outputPath: written.outputPath } : result;
     }
   )
 });
