@@ -1,0 +1,59 @@
+tests/moka-api.test.ts
+  s_c60f8cd13cb001::t_231c9fdb4ccd10 2,5,11,18-26
+  s_c60f8cd13cb001::t_71cc7eb8d19c0f 1,3-4,6-8,10,12-17,27-28
+  s_c60f8cd13cb001::t_9774de9a89a75e 9
+reference/moka-interview-apis.md
+  s_c60f8cd13cb001::t_81e45d03c2d0ef 35,38,56
+  s_c60f8cd13cb001::t_39709c09bf8ccf 36,39
+  s_c60f8cd13cb001::t_4479cf34a8306b 86,224,263
+  s_c60f8cd13cb001::t_9774de9a89a75e 37
+  s_c60f8cd13cb001::t_79849da36db5a0 33
+  s_c60f8cd13cb001::t_9e89a2cc9e75d1 40-55,219
+  s_c60f8cd13cb001::t_979b8dd5706caf 82-83
+src/parsers.ts
+  s_c60f8cd13cb001::t_41f87698454766 38,41-74
+tests/parsers.test.ts
+  s_c60f8cd13cb001::t_979b8dd5706caf 33-55,57-63,65-68
+  s_c60f8cd13cb001::t_56fc8c1985eabe 56,64
+src/plugin.ts
+  s_c60f8cd13cb001::t_41f87698454766 114
+README.md
+  s_c60f8cd13cb001::t_81e45d03c2d0ef 71
+  s_c60f8cd13cb001::t_4479cf34a8306b 64,67
+  s_c60f8cd13cb001::t_79849da36db5a0 69
+TESTING.md
+  s_c60f8cd13cb001::t_a637cba11594e4 215,249,271,297,308,324,524,530
+  s_c60f8cd13cb001::t_4479cf34a8306b 80-81,192,206,223,229,238,250-251,335,341-342,350,379,389,520,533,539
+  s_c60f8cd13cb001::t_5efbe323e4ecff 228
+  s_c60f8cd13cb001::t_9e89a2cc9e75d1 3,216-218,263,273-274,337
+  s_c60f8cd13cb001::t_da8975c44303da 187
+src/types.ts
+  s_c60f8cd13cb001::t_41f87698454766 9-11
+moka.js
+  s_c60f8cd13cb001::t_470ea955d4fce4 469-476,478,480-484,495,497,501-517,519
+  s_c60f8cd13cb001::t_2ead887ee873ac 340,343-366,695
+  s_c60f8cd13cb001::t_547e9e361af427 477
+  s_c60f8cd13cb001::t_a582ca2f825768 479,485-494,498,500,518
+src/moka-api.ts
+  s_c60f8cd13cb001::t_9774de9a89a75e 45
+  s_c60f8cd13cb001::t_71cc7eb8d19c0f 36-44,46-47,49-53,64-65,76,79-80,84-100,102
+  s_c60f8cd13cb001::t_231c9fdb4ccd10 48,54-63,81,83,101
+skills/moka-interview-transcripts/SKILL.md
+  s_c60f8cd13cb001::t_4479cf34a8306b 20-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "f02e230bb333c244ebb5bb2baf0e1341cf9f7ed0",
+  "prompts": {},
+  "sessions": {
+    "s_c60f8cd13cb001": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a033d2-187d-7ff3-81fc-4ea42f1b2c12",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
