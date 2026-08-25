@@ -1,0 +1,47 @@
+tests/collector.test.ts
+  s_c60f8cd13cb001::t_2381787f9fe5a1 2-4,7,140-144,155-156,158-159,162-164,167,169-176,179-182
+  s_c60f8cd13cb001::t_c0c395cbf45a8d 8,145-154,157,160-161,165-166,168,177-178
+  s_c60f8cd13cb001::t_9473b73a8cd632 76-137
+src/plugin.ts
+  s_c60f8cd13cb001::t_9473b73a8cd632 197,200-202
+  s_38915567d451c4::t_64b3d86a29a83b 77
+  s_c60f8cd13cb001::t_6742c99ba03d4a 140,166-167,170-171
+src/collector.ts
+  s_c60f8cd13cb001::t_9473b73a8cd632 1,5,71-124,126-130,132
+skills/moka-interview-transcripts/SKILL.md
+  s_c60f8cd13cb001::t_9473b73a8cd632 28-29
+README.md
+  s_c60f8cd13cb001::t_2d6206ae773f4b 83-84
+  s_c60f8cd13cb001::t_9473b73a8cd632 52-59
+moka.js
+  s_c60f8cd13cb001::t_95fcfbc2dbc30e 42-43,46-65,67-69,72-79,113,115-121,136-143,740
+  s_c60f8cd13cb001::t_1f5c208da60fcf 351,634-673,675-677,680,855-856
+  s_c60f8cd13cb001::t_b1bc4df614a7f1 800,825-826,829-830
+TESTING.md
+  s_c60f8cd13cb001::t_3494b05cbc63b8 405-426
+  s_c60f8cd13cb001::t_2d6206ae773f4b 129-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "a83fb6fc69bed81d5f3ef85122d1abe80f546c73",
+  "prompts": {},
+  "sessions": {
+    "s_38915567d451c4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a038fc-73fd-73a3-aead-93a71ae749c6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    },
+    "s_c60f8cd13cb001": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a033d2-187d-7ff3-81fc-4ea42f1b2c12",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
