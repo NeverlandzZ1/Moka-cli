@@ -1,0 +1,6 @@
+{
+  "name": "moka-transcripts",
+  "version": "0.1.0",
+  "opencli": ">=1.8.6 <2",
+  "description": "从 HR 已登录的 Moka 浏览器会话中读取候选人、面试官和面试逐字稿"
+}

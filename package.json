@@ -1,0 +1,26 @@
+{
+  "name": "opencli-plugin-moka-transcripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenCLI plugin for exporting Moka interview transcripts from an HR's logged-in Chrome session.",
+  "scripts": {
+    "build": "esbuild src/plugin.ts --bundle --platform=node --format=esm --outfile=moka.js --external:@jackwener/opencli/*",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "peerDependencies": {
+    "@jackwener/opencli": ">=1.8.6 <2"
+  },
+  "devDependencies": {
+    "@jackwener/opencli": "1.8.6",
+    "@types/node": "^22.15.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
