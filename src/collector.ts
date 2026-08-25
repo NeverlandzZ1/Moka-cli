@@ -8,7 +8,6 @@ import { errorMessage } from './utils.js';
 
 export interface CollectOptions {
   requestBody?: JsonRecord;
-  maxPages?: number;
   candidateName?: string;
 }
 

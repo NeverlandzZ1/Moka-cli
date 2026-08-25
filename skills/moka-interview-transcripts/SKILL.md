@@ -17,9 +17,11 @@ description: 通过 Moka 专用 Chrome 登录会话查询或导出候选人、�
 
 ## 数据操作
 
-- 批量导出：`opencli moka export-transcripts --output <绝对路径>.json -f json`
-- 按姓名导出：增加 `--candidate "<候选人姓名>"`
-- 查看应聘记录：`opencli moka applications --candidate "<候选人姓名>" -f json`
+候选人发现范围固定为北京时间今天：自动读取今天的全部分页，不读取昨天或未来。发现候选人后，`interviewCard` 会返回其当前应聘记录至今的全部面试，因此最终导出仍包含这些候选人的历史面试轮次。
+
+- 导出今天涉及候选人的全部面试：`opencli moka export-transcripts --output <绝对路径>.json -f json`
+- 按姓名导出：增加 `--candidate "<今天有面试的候选人姓名>"`
+- 查看今天的应聘记录：`opencli moka applications --candidate "<候选人姓名>" -f json`
 - 查看某应聘记录的面试：`opencli moka interviews <applicationId> -f json`
 - 查看单场逐字稿：`opencli moka transcript <applicationId> <interviewId> -f json`
 
@@ -28,4 +30,3 @@ description: 通过 Moka 专用 Chrome 登录会话查询或导出候选人、�
 需要判断字段来源或排查接口变化时，读取 [Moka 接口说明](../../reference/moka-interview-apis.md)。
 
 只读取当前登录账号有权访问的数据。逐字稿包含候选人个人信息，不要上传到未获授权的外部服务。
-

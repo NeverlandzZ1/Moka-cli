@@ -6,6 +6,9 @@ export interface ApplicationRecord {
   candidateName: string;
   jobTitle: string;
   jobId?: Id;
+  overviewInterviewId?: Id;
+  overviewStartTime?: number | string;
+  overviewStartTimeIso?: string;
 }
 
 export interface InterviewRecord extends ApplicationRecord {
@@ -48,4 +51,3 @@ export interface CollectionResult {
     errors: number;
   };
 }
-

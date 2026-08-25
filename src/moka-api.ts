@@ -33,9 +33,38 @@ function bodyForPage(base: JsonRecord, page: number): JsonRecord {
   return result;
 }
 
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+export function shanghaiDayBounds(now = Date.now()): { start: number; end: number } {
+  const shifted = new Date(now + SHANGHAI_OFFSET_MS);
+  const start = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+  ) - SHANGHAI_OFFSET_MS;
+  return { start, end: start + 24 * 60 * 60 * 1000 - 1000 };
+}
+
+export function defaultInterviewListBody(base: JsonRecord, now = Date.now()): JsonRecord {
+  const shared = { ...base };
+  for (const key of ['countType', 'order', 'minStartDate', 'maxStartDate', 'currentPage', 'pageNum', 'page']) {
+    delete shared[key];
+  }
+  const { start, end } = shanghaiDayBounds(now);
+  return {
+    ...shared,
+    jobPreference: shared.jobPreference ?? 'all',
+    countType: 'today',
+    order: 'asc',
+    minStartDate: start,
+    maxStartDate: end,
+    currentPage: 1,
+    pageSize: shared.pageSize ?? 10,
+  };
+}
+
 export interface ListApplicationsOptions {
   requestBody?: JsonRecord;
-  maxPages?: number;
   candidateName?: string;
 }
 
@@ -44,27 +73,33 @@ export async function listApplications(
   bridge: CDPBridge,
   options: ListApplicationsOptions = {},
 ): Promise<ApplicationRecord[]> {
-  const baseBody = options.requestBody
+  const capturedBody = options.requestBody
     ? { ...options.requestBody }
     : await discoverInterviewListPayload(page, bridge);
+  const queryBodies = options.requestBody
+    ? [capturedBody]
+    : [defaultInterviewListBody(capturedBody)];
   const records = new Map<string, ApplicationRecord>();
-  let currentPage = 1;
-  let totalPage = 1;
-  do {
-    const response = await page.fetchJson(API_PATHS.interviewList, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: bodyForPage(baseBody, currentPage),
-      timeoutMs: 30_000,
-    });
-    assertApiResponse(response, 'interviewList');
-    for (const application of parseApplications(response)) {
-      records.set(String(application.applicationId), application);
-    }
-    const pagination = readPagination(response);
-    totalPage = pagination.totalPage;
-    currentPage += 1;
-  } while (currentPage <= totalPage && (!options.maxPages || currentPage <= options.maxPages));
+  for (const baseBody of queryBodies) {
+    let currentPage = 1;
+    let totalPage = 1;
+    do {
+      const response = await page.fetchJson(API_PATHS.interviewList, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyForPage(baseBody, currentPage),
+        timeoutMs: 30_000,
+      });
+      assertApiResponse(response, 'interviewList');
+      for (const application of parseApplications(response)) {
+        const key = String(application.applicationId);
+        if (!records.has(key)) records.set(key, application);
+      }
+      const pagination = readPagination(response);
+      totalPage = pagination.totalPage;
+      currentPage += 1;
+    } while (currentPage <= totalPage);
+  }
 
   const all = [...records.values()];
   const needle = options.candidateName?.trim().toLocaleLowerCase();

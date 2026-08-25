@@ -61,12 +61,14 @@ opencli moka export-transcripts --candidate "候选人姓名" --output ".\候选
 | --- | --- |
 | `opencli moka login` | 启动专用 Chrome 并打开 Moka |
 | `opencli moka status` | 检查浏览器与 Moka 登录状态 |
-| `opencli moka applications` | 获取应聘记录、候选人和岗位 |
+| `opencli moka applications` | 获取今天有面试的应聘记录、候选人和岗位 |
 | `opencli moka interviews <applicationId>` | 获取全部面试及面试官 |
 | `opencli moka transcript <applicationId> <interviewId>` | 获取单场逐字稿 |
-| `opencli moka export-transcripts` | 执行完整调用链并导出 |
+| `opencli moka export-transcripts` | 导出今天涉及候选人的全部面试记录 |
 
-`interviewList` 的请求体会从 Moka 总览页的真实网络请求中自动捕获，因此可以继承页面当前的筛选条件，并避免硬编码未公开字段。首次捕获时，插件会监听当前正常加载的总览页，并只读点击一次列表底部的“加载更多”；捕获到请求体后缓存在当前标签页的专用 `sessionStorage` 键中。后续命令直接复用缓存，不刷新页面，也不会读取或保存 Moka 的 Cookie、Token。
+`interviewList` 的请求体模板会从 Moka 总览页的真实网络请求中自动捕获，以复用页面所需的未公开字段。首次捕获时，插件会监听当前正常加载的总览页，并只读点击一次列表底部的“加载更多”；捕获到请求体后缓存在当前标签页的专用 `sessionStorage` 键中。实际采集时会把时间范围明确覆盖为北京时间今天，并保留岗位等其他模板字段。后续命令直接复用缓存，不刷新页面，也不会读取或保存 Moka 的 Cookie、Token。
+
+默认只发现“今天”的面试，不请求历史或未来：范围按北京时间动态计算，按开始时间升序，并自动遍历今天的全部分页。结果按 `applicationId` 去重；随后每个唯一应聘记录只调用一次 `interviewCard`，由该接口返回这条应聘记录至今的全部面试。只有显式传入高级调试参数 `--request-json` 时，才会按照用户提供的单一查询执行。
 
 重复执行 `opencli moka login` 时会优先复用并聚焦已经打开的 Moka 总览页或登录页，不会为每次状态检查重复创建 Moka 标签页。只有当前 CDP Chrome 中完全没有 Moka 页面时才新建标签页。
 

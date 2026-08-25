@@ -30,7 +30,30 @@ https://app.mokahr.com/interviews/overview
 
 请求体包含分页和筛选条件。当前已确认响应中的 `currentPage`、`pageSize` 和 `totalPage`，但请求 Payload 的完整字段仍应以浏览器 Network 中的实际请求为准。
 
-当前插件不会猜测或硬编码这份 Payload。执行 `applications` 或 `export-transcripts` 时，先检查当前 Moka 标签页里是否已有插件自己缓存的请求体；没有缓存时，会监听 CDP 的 `Network.requestWillBeSent`，只读点击一次总览列表底部的“加载更多”，捕获 Moka 前端自己发出的 `interviewList` POST 请求体。捕获结果只缓存在当前标签页的专用 `sessionStorage` 键中；后续仅覆盖其中的页码字段完成翻页。这个过程不会刷新 HR 当前页面，也会自然继承总览页当前选择的筛选条件。
+当前插件不会猜测完整 Payload。执行 `applications` 或 `export-transcripts` 时，先检查当前 Moka 标签页里是否已有插件自己缓存的请求体模板；没有缓存时，会监听 CDP 的 `Network.requestWillBeSent`，只读点击一次总览列表底部的“加载更多”，捕获 Moka 前端自己发出的 `interviewList` POST 请求体。捕获结果只缓存在当前标签页的专用 `sessionStorage` 键中。实际采集会覆盖模板里的时间范围、排序和页码，固定查询北京时间今天；岗位等其他可复用字段继续沿用模板。这个过程不会刷新 HR 当前页面。
+
+默认调用时，插件以捕获的请求体作为字段模板，动态按北京时间生成今天的完整查询范围：
+
+- `today`：`order=asc`，包含当天 00:00:00 至 23:59:59.000。
+- 不请求 `beforeToday` 或 `afterToday`。
+
+以北京时间 2026-08-25 为例，第一页请求体为：
+
+```json
+{
+  "jobPreference": "all",
+  "countType": "today",
+  "order": "asc",
+  "minStartDate": 1787587200000,
+  "maxStartDate": 1787673599000,
+  "currentPage": 1,
+  "pageSize": 10
+}
+```
+
+`minStartDate` 和 `maxStartDate` 每天动态计算，后续页只修改 `currentPage`。
+
+插件根据响应中的分页信息自动拉完今天的全部页，再按 `applicationId` 去重，并且后续对每个唯一应聘记录只请求一次 `interviewCard`。显式传入 `--request-json` 时不生成默认的今天范围，而是只执行用户提供的单一查询。
 
 ### 主要响应结构
 
@@ -56,9 +79,11 @@ data
 | 候选人姓名 | `data.rows[].applicationEntities[].name` |
 | 岗位名称 | `data.rows[].applicationEntities[].job.title` |
 
+`applicationEntities[]` 是候选人资料字典，不保证与页面的面试时间顺序一致。真正的列表顺序来自同一行的 `restinterviews[]`；每个面试通过 `applicationIds[]` 或 `validApplicationIds[]` 关联候选人，并携带 `id`、`startTime` 等字段。解析时应先按 `restinterviews[]` 顺序遍历，再查找对应的 `applicationEntities[]`，不能直接把资料字典顺序当作列表顺序。
+
 `applicationId` 表示一次应聘记录，不等同于候选人的永久人员 ID。同一个人投递多个岗位时，可能有多个不同的 `applicationId`，因此后续关联必须使用 `applicationId`，不能只依赖姓名。
 
-采集全量数据时，需要按照 `totalPage` 遍历所有分页。
+发现今天的全部候选人时，需要按照 `totalPage` 遍历今天范围内的所有分页。
 
 ---
 
@@ -191,12 +216,12 @@ Content-Type: application/json
 
 ---
 
-## 完整调用链路
+## 完整调用链路（今天候选人）
 
 ```text
 1. 用户登录 Moka
    ↓
-2. 分页调用 interviewList
+2. 按北京时间查询今天，并分页调用 interviewList 直至最后一页
    ↓
    获得：applicationId + 候选人姓名 + 岗位名称
    ↓
@@ -235,7 +260,7 @@ Content-Type: application/json
 ## 实现注意事项
 
 - 全程复用浏览器现有登录态，不保存密码、Cookie 或 Token。
-- `interviewList` 必须遍历全部分页。
+- `interviewList` 只查询今天，并且必须遍历今天范围内的全部分页。
 - `interviewCard` 必须遍历全部 `data[]` 和 `entities[]`。
 - 多位面试官保存为数组并去重。
 - 同名候选人的数据使用 `applicationId` 区分。

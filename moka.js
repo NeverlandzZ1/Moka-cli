@@ -337,9 +337,33 @@ function parseApplications(response) {
   const result = /* @__PURE__ */ new Map();
   for (const row of asArray(response.data.rows)) {
     if (!isRecord(row)) continue;
+    const applicationsInRow = /* @__PURE__ */ new Map();
     for (const entity of asArray(row.applicationEntities)) {
       const application = applicationFromEntity(entity);
-      if (application) result.set(String(application.applicationId), application);
+      if (application) applicationsInRow.set(String(application.applicationId), application);
+    }
+    for (const interviewValue of asArray(row.restinterviews)) {
+      if (!isRecord(interviewValue)) continue;
+      const interviewId = readId(interviewValue.id);
+      const startTime = readId(interviewValue.startTime);
+      const linkedIds = asArray(interviewValue.validApplicationIds).length ? asArray(interviewValue.validApplicationIds) : asArray(interviewValue.applicationIds);
+      for (const linkedId of linkedIds) {
+        const id = readId(linkedId);
+        if (id === void 0) continue;
+        const application = applicationsInRow.get(String(id));
+        if (!application || result.has(String(id))) continue;
+        const startTimeNumber = asOptionalNumber(startTime);
+        result.set(String(id), {
+          ...application,
+          ...interviewId === void 0 ? {} : { overviewInterviewId: interviewId },
+          ...startTime === void 0 ? {} : { overviewStartTime: startTime },
+          ...startTimeNumber === void 0 ? {} : { overviewStartTimeIso: new Date(startTimeNumber).toISOString() }
+        });
+      }
+    }
+    for (const application of applicationsInRow.values()) {
+      const key = String(application.applicationId);
+      if (!result.has(key)) result.set(key, application);
     }
   }
   return [...result.values()];
@@ -442,26 +466,57 @@ function bodyForPage(base, page) {
   result[pageKey] = page;
   return result;
 }
+var SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1e3;
+function shanghaiDayBounds(now = Date.now()) {
+  const shifted = new Date(now + SHANGHAI_OFFSET_MS);
+  const start = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  ) - SHANGHAI_OFFSET_MS;
+  return { start, end: start + 24 * 60 * 60 * 1e3 - 1e3 };
+}
+function defaultInterviewListBody(base, now = Date.now()) {
+  const shared = { ...base };
+  for (const key of ["countType", "order", "minStartDate", "maxStartDate", "currentPage", "pageNum", "page"]) {
+    delete shared[key];
+  }
+  const { start, end } = shanghaiDayBounds(now);
+  return {
+    ...shared,
+    jobPreference: shared.jobPreference ?? "all",
+    countType: "today",
+    order: "asc",
+    minStartDate: start,
+    maxStartDate: end,
+    currentPage: 1,
+    pageSize: shared.pageSize ?? 10
+  };
+}
 async function listApplications(page, bridge, options = {}) {
-  const baseBody = options.requestBody ? { ...options.requestBody } : await discoverInterviewListPayload(page, bridge);
+  const capturedBody = options.requestBody ? { ...options.requestBody } : await discoverInterviewListPayload(page, bridge);
+  const queryBodies = options.requestBody ? [capturedBody] : [defaultInterviewListBody(capturedBody)];
   const records = /* @__PURE__ */ new Map();
-  let currentPage = 1;
-  let totalPage = 1;
-  do {
-    const response = await page.fetchJson(API_PATHS.interviewList, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: bodyForPage(baseBody, currentPage),
-      timeoutMs: 3e4
-    });
-    assertApiResponse(response, "interviewList");
-    for (const application of parseApplications(response)) {
-      records.set(String(application.applicationId), application);
-    }
-    const pagination = readPagination(response);
-    totalPage = pagination.totalPage;
-    currentPage += 1;
-  } while (currentPage <= totalPage && (!options.maxPages || currentPage <= options.maxPages));
+  for (const baseBody of queryBodies) {
+    let currentPage = 1;
+    let totalPage = 1;
+    do {
+      const response = await page.fetchJson(API_PATHS.interviewList, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bodyForPage(baseBody, currentPage),
+        timeoutMs: 3e4
+      });
+      assertApiResponse(response, "interviewList");
+      for (const application of parseApplications(response)) {
+        const key = String(application.applicationId);
+        if (!records.has(key)) records.set(key, application);
+      }
+      const pagination = readPagination(response);
+      totalPage = pagination.totalPage;
+      currentPage += 1;
+    } while (currentPage <= totalPage);
+  }
   const all = [...records.values()];
   const needle = options.candidateName?.trim().toLocaleLowerCase();
   return needle ? all.filter((item) => item.candidateName.toLocaleLowerCase().includes(needle)) : all;
@@ -568,11 +623,9 @@ function optionalRequestBody(value) {
 }
 function collectionOptions(kwargs) {
   const candidateName = typeof kwargs.candidate === "string" && kwargs.candidate.trim() ? kwargs.candidate.trim() : void 0;
-  const maxPages = Number(kwargs.maxPages) || void 0;
   const requestBody = optionalRequestBody(kwargs.requestJson);
   return {
     ...candidateName ? { candidateName } : {},
-    ...maxPages ? { maxPages } : {},
     ...requestBody ? { requestBody } : {}
   };
 }
@@ -637,10 +690,9 @@ cli({
   args: [
     commonPortArg,
     { name: "candidate", valueRequired: true, help: "\u6309\u5019\u9009\u4EBA\u59D3\u540D\u7B5B\u9009" },
-    { name: "max-pages", type: "int", default: 0, help: "\u6700\u591A\u8BFB\u53D6\u9875\u6570\uFF1B0 \u8868\u793A\u5168\u90E8" },
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],
-  columns: ["applicationId", "candidateName", "jobTitle"],
+  columns: ["applicationId", "candidateName", "jobTitle", "overviewStartTimeIso"],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page, bridge) => listApplications(page, bridge, collectionOptions(kwargs))
@@ -712,7 +764,6 @@ cli({
   args: [
     commonPortArg,
     { name: "candidate", valueRequired: true, help: "\u6309\u5019\u9009\u4EBA\u59D3\u540D\u7B5B\u9009" },
-    { name: "max-pages", type: "int", default: 0, help: "\u6700\u591A\u8BFB\u53D6\u9875\u6570\uFF1B0 \u8868\u793A\u5168\u90E8" },
     { name: "output", valueRequired: true, help: "JSON \u6587\u4EF6\u8F93\u51FA\u8DEF\u5F84" },
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],

@@ -1,6 +1,6 @@
 # Moka Transcript Getter 本地测试流程
 
-本文用于开发和联调 `Moka-transcript-getter`。建议严格按顺序执行，不要在基础步骤失败时直接进行全量导出。
+本文用于开发和联调 `Moka-transcript-getter`。建议严格按顺序执行，不要在基础步骤失败时直接进行今日全量导出。
 
 ## 1. 进入项目
 
@@ -77,8 +77,8 @@ npm run check
 通过标准：
 
 ```text
-Test Files  3 passed
-Tests       6 passed
+Test Files  5 passed
+Tests       10 passed
 moka.js 构建成功
 ```
 
@@ -184,16 +184,15 @@ Invoke-RestMethod `
 ```powershell
 opencli moka login --port 9223 -f json
 opencli moka status --port 9223 -f json
-opencli moka applications --port 9223 --max-pages 1 -f json
+opencli moka applications --port 9223 -f json
 ```
 
 ## 8. 测试候选人列表
 
-第一次只读取一页：
+读取今天的全部候选人：
 
 ```powershell
 opencli moka applications `
-  --max-pages 1 `
   -f json `
   -v
 ```
@@ -204,7 +203,7 @@ opencli moka applications `
 2. 只读点击一次列表底部的“加载更多”。
 3. 捕获 Moka 自己发出的 `interviewList` POST 请求体。
 4. 将请求体缓存在当前标签页的专用 `sessionStorage` 键中。
-5. 使用捕获的请求体读取第一页。
+5. 将筛选范围改为北京时间今天，并自动读取今天的全部分页。
 
 这个动作只会让页面多显示一批候选人，不会修改 Moka 数据，也不会刷新当前页面。
 
@@ -213,19 +212,21 @@ opencli moka applications `
 ```json
 [
   {
-    "applicationId": 813749158,
-    "candidateName": "李龙一",
-    "jobTitle": "增长产品经理Growth Product Manager",
-    "jobId": "aecae375-ee47-4af1-87fe-bc1b73b755c0"
+    "applicationId": 123456789,
+    "candidateName": "今天候选人姓名",
+    "jobTitle": "对应岗位",
+    "jobId": "真实岗位ID"
   }
 ]
 ```
 
-实际结果通常不止一条。重点检查：
+实际结果以今天的排期为准，今天没有面试时可以是空数组。重点检查：
 
 - `applicationId` 存在。
 - 候选人姓名正确。
 - 岗位名称正确。
+- `overviewStartTimeIso` 存在，输出顺序与该时间的后端排序一致。
+- 所有记录的面试时间都属于北京时间今天。
 - 命令没有刷新或破坏 Moka 页面。
 
 ## 9. 测试请求体缓存
@@ -234,8 +235,7 @@ opencli moka applications `
 
 ```powershell
 opencli moka applications `
-  --candidate "李龙一" `
-  --max-pages 1 `
+  --candidate "<今天候选人姓名>" `
   -f json
 ```
 
@@ -246,9 +246,9 @@ opencli moka applications `
 ```json
 [
   {
-    "applicationId": 813749158,
-    "candidateName": "李龙一",
-    "jobTitle": "增长产品经理Growth Product Manager"
+    "applicationId": 123456789,
+    "candidateName": "今天候选人姓名",
+    "jobTitle": "对应岗位"
   }
 ]
 ```
@@ -260,7 +260,7 @@ opencli moka applications `
 从 `applications` 结果中复制真实的 `applicationId`：
 
 ```powershell
-opencli moka interviews 813749158 -f json -v
+opencli moka interviews <真实applicationId> -f json -v
 ```
 
 通过标准：
@@ -268,10 +268,10 @@ opencli moka interviews 813749158 -f json -v
 ```json
 [
   {
-    "applicationId": 813749158,
+    "applicationId": 123456789,
     "interviewId": 真实面试ID,
-    "candidateName": "李龙一",
-    "jobTitle": "增长产品经理Growth Product Manager",
+    "candidateName": "今天候选人姓名",
+    "jobTitle": "对应岗位",
     "interviewerNames": [
       "面试官姓名"
     ],
@@ -294,7 +294,7 @@ opencli moka interviews 813749158 -f json -v
 
 ```powershell
 opencli moka transcript `
-  813749158 `
+  <真实applicationId> `
   <真实interviewId> `
   -f json `
   -v
@@ -305,7 +305,7 @@ opencli moka transcript `
 ```json
 [
   {
-    "applicationId": 813749158,
+    "applicationId": 123456789,
     "interviewId": 真实面试ID,
     "transcriptStatus": "available",
     "transcript": "...",
@@ -321,7 +321,7 @@ opencli moka transcript `
 ```json
 [
   {
-    "applicationId": 813749158,
+    "applicationId": 123456789,
     "interviewId": 真实面试ID,
     "transcriptStatus": "not_available",
     "mokaCode": 103,
@@ -332,15 +332,14 @@ opencli moka transcript `
 
 `code: 103` 表示当前面试没有可用逐字稿，不代表插件整体失败。应继续测试同一候选人的其他面试。
 
-## 12. 小范围完整导出
+## 12. 单个今日候选人完整导出
 
-不要直接从全量导出开始。先测试一个候选人：
+不要直接从今日全量导出开始。先测试一个今天有面试的候选人：
 
 ```powershell
 opencli moka export-transcripts `
-  --candidate "李龙一" `
-  --max-pages 1 `
-  --output "D:\tmp\moka-debug-李龙一.json" `
+  --candidate "<今天候选人姓名>" `
+  --output "D:\tmp\moka-debug-candidate.json" `
   -f json `
   -v
 ```
@@ -348,7 +347,7 @@ opencli moka export-transcripts `
 查看文件：
 
 ```powershell
-Get-Content -Raw -Encoding utf8 "D:\tmp\moka-debug-李龙一.json"
+Get-Content -Raw -Encoding utf8 "D:\tmp\moka-debug-candidate.json"
 ```
 
 重点检查输出结构：
@@ -377,7 +376,7 @@ Get-Content -Raw -Encoding utf8 "D:\tmp\moka-debug-李龙一.json"
 - 暂无逐字稿计入 `transcriptsUnavailable`。
 - 单项错误记录在 `errors`，不会丢失已经成功的记录。
 
-## 13. 全量导出
+## 13. 今日全量导出
 
 小范围导出确认无误后，再执行：
 
@@ -387,7 +386,7 @@ opencli moka export-transcripts `
   -f json
 ```
 
-全量任务当前按顺序调用接口，候选人和面试较多时可能需要较长时间。执行期间：
+任务会发现今天的全部候选人，再读取这些候选人至今的全部面试；候选人和面试较多时可能需要较长时间。执行期间：
 
 - 不要关闭 CDP Chrome。
 - 不要退出 Moka。
@@ -419,7 +418,6 @@ $body = '{"currentPage":1,"pageSize":10,"其他字段":"以实际Payload为准"}
 
 opencli moka applications `
   --request-json $body `
-  --max-pages 1 `
   -f json `
   -v
 ```
@@ -519,28 +517,26 @@ npm run check
 opencli moka status -f json
 
 opencli moka applications `
-  --candidate "李龙一" `
-  --max-pages 1 `
+  --candidate "<今天候选人姓名>" `
   -f json `
   -v
 
-opencli moka interviews 813749158 -f json -v
+opencli moka interviews <真实applicationId> -f json -v
 ```
 
 从 `interviews` 输出复制一个真实 `interviewId`：
 
 ```powershell
-opencli moka transcript 813749158 <真实interviewId> -f json -v
+opencli moka transcript <真实applicationId> <真实interviewId> -f json -v
 
 opencli moka export-transcripts `
-  --candidate "李龙一" `
-  --max-pages 1 `
+  --candidate "<今天候选人姓名>" `
   --output "D:\tmp\moka-regression.json" `
   -f json `
   -v
 ```
 
-全部通过后，才进行全量导出。
+全部通过后，才进行今日全量导出。
 
 ## 17. 安全要求
 

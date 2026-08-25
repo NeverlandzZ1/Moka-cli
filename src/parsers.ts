@@ -35,9 +35,43 @@ export function parseApplications(response: unknown): ApplicationRecord[] {
   const result = new Map<string, ApplicationRecord>();
   for (const row of asArray(response.data.rows)) {
     if (!isRecord(row)) continue;
+    const applicationsInRow = new Map<string, ApplicationRecord>();
     for (const entity of asArray(row.applicationEntities)) {
       const application = applicationFromEntity(entity);
-      if (application) result.set(String(application.applicationId), application);
+      if (application) applicationsInRow.set(String(application.applicationId), application);
+    }
+
+    // applicationEntities is a lookup array and does not carry display order.
+    // restinterviews is ordered by the request's `order` field and links back
+    // through applicationIds/validApplicationIds.
+    for (const interviewValue of asArray(row.restinterviews)) {
+      if (!isRecord(interviewValue)) continue;
+      const interviewId = readId(interviewValue.id);
+      const startTime = readId(interviewValue.startTime);
+      const linkedIds = asArray(interviewValue.validApplicationIds).length
+        ? asArray(interviewValue.validApplicationIds)
+        : asArray(interviewValue.applicationIds);
+      for (const linkedId of linkedIds) {
+        const id = readId(linkedId);
+        if (id === undefined) continue;
+        const application = applicationsInRow.get(String(id));
+        if (!application || result.has(String(id))) continue;
+        const startTimeNumber = asOptionalNumber(startTime);
+        result.set(String(id), {
+          ...application,
+          ...(interviewId === undefined ? {} : { overviewInterviewId: interviewId }),
+          ...(startTime === undefined ? {} : { overviewStartTime: startTime }),
+          ...(startTimeNumber === undefined
+            ? {}
+            : { overviewStartTimeIso: new Date(startTimeNumber).toISOString() }),
+        });
+      }
+    }
+
+    // Append lookup entries that have no matching restinterviews item.
+    for (const application of applicationsInRow.values()) {
+      const key = String(application.applicationId);
+      if (!result.has(key)) result.set(key, application);
     }
   }
   return [...result.values()];
@@ -130,4 +164,3 @@ export function parseMeetingSummary(response: unknown): MeetingSummaryRecord {
     ...(message ? { mokaMessage: message } : {}),
   };
 }
-

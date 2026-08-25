@@ -34,17 +34,14 @@ function optionalRequestBody(value: unknown): JsonRecord | undefined {
 
 function collectionOptions(kwargs: Record<string, unknown>): {
   candidateName?: string;
-  maxPages?: number;
   requestBody?: JsonRecord;
 } {
   const candidateName = typeof kwargs.candidate === 'string' && kwargs.candidate.trim()
     ? kwargs.candidate.trim()
     : undefined;
-  const maxPages = Number(kwargs.maxPages) || undefined;
   const requestBody = optionalRequestBody(kwargs.requestJson);
   return {
     ...(candidateName ? { candidateName } : {}),
-    ...(maxPages ? { maxPages } : {}),
     ...(requestBody ? { requestBody } : {}),
   };
 }
@@ -112,10 +109,9 @@ cli({
   args: [
     commonPortArg,
     { name: 'candidate', valueRequired: true, help: '按候选人姓名筛选' },
-    { name: 'max-pages', type: 'int', default: 0, help: '最多读取页数；0 表示全部' },
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
-  columns: ['applicationId', 'candidateName', 'jobTitle'],
+  columns: ['applicationId', 'candidateName', 'jobTitle', 'overviewStartTimeIso'],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page, bridge) => listApplications(page, bridge, collectionOptions(kwargs)),
@@ -190,7 +186,6 @@ cli({
   args: [
     commonPortArg,
     { name: 'candidate', valueRequired: true, help: '按候选人姓名筛选' },
-    { name: 'max-pages', type: 'int', default: 0, help: '最多读取页数；0 表示全部' },
     { name: 'output', valueRequired: true, help: 'JSON 文件输出路径' },
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
