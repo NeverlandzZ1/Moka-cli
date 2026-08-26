@@ -1,4 +1,0 @@
-interface:
-  display_name: "Moka 面试转写抓取"
-  short_description: "为 HR 配置 Moka 并定时抓取校招、社招面试转写"
-  default_prompt: "使用 $moka-transcript-getter 配置环境并登录 Moka。"
