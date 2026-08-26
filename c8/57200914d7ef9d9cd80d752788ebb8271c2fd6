@@ -1,0 +1,21 @@
+skills/moka-transcript-getter/agents/openai.yaml
+  s_c60f8cd13cb001::t_1b60443a12c15e 1-4
+skills/moka-transcript-getter/SKILL.md
+  s_c60f8cd13cb001::t_95968cca298682 1-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "c857200914d7ef9d9cd80d752788ebb8271c2fd6",
+  "prompts": {},
+  "sessions": {
+    "s_c60f8cd13cb001": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a033d2-187d-7ff3-81fc-4ea42f1b2c12",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
