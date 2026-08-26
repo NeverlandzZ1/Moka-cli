@@ -1,91 +1,182 @@
 # Moka Transcript Getter
 
-基于 OpenCLI 和 Chrome CDP，从 HR 已登录的 Moka 会话中导出：
+面向 HR 的 Moka 面试记录导出工具。登录 Moka 后，一条命令即可导出今天涉及候选人的：
 
-- 候选人姓名
-- 应聘岗位
-- 每场面试及面试官
-- 面试逐字稿、AI 总结和逐题分析
+项目地址：[NeverlandzZ1/Moka-cli](https://github.com/NeverlandzZ1/Moka-cli)
 
-插件不会读取或保存 Moka 密码、Cookie、JWT 或 CSRF Token。所有接口请求都在 HR 自己登录的 Chrome 页面上下文中发起。
+- 候选人姓名和应聘岗位
+- 全部面试轮次及面试官
+- 面试逐字稿
+- Moka AI 总结和逐题分析
 
-## 开发环境
+工具只读取当前账号有权查看的数据，不要求复制 Cookie、Token、密码或验证码。
 
-- Windows 10/11
-- Node.js 20+
-- Google Chrome
-- `@jackwener/opencli` 1.8.6+
+## 使用前准备
 
-```powershell
-npm install -g @jackwener/opencli@1.8.6
-npm install
-npm run check
-opencli plugin install .
+电脑需要安装：
+
+- [Google Chrome](https://www.google.com/chrome/)
+- [Node.js 22 LTS](https://nodejs.org/)
+- [Git](https://git-scm.com/downloads)
+
+不需要安装 Python，也不需要安装 Chrome 扩展。
+
+打开终端并确认：
+
+```text
+node --version
+git --version
 ```
 
-## HR 使用流程
+## 第一次安装
 
-第一步只需要打开登录窗口：
+### 1. 安装 OpenCLI
 
-```powershell
+Windows PowerShell 或 macOS Terminal 均可执行：
+
+```text
+npm install -g @jackwener/opencli@latest
+```
+
+确认安装成功：
+
+```text
+opencli --version
+```
+
+### 2. 安装 Moka 插件
+
+```text
+opencli plugin install github:NeverlandzZ1/Moka-cli
+```
+
+确认插件已安装：
+
+```text
+opencli plugin list
+opencli moka export-transcripts --help
+```
+
+### 3. 登录 Moka
+
+```text
 opencli moka login -f json
 ```
 
-系统会使用独立 Chrome Profile 打开：
+命令会打开一个专用 Chrome 窗口。请在该窗口中自行登录 Moka，不要关闭窗口。
+
+登录完成后可以检查状态：
 
 ```text
-https://app.mokahr.com/interviews/overview
-```
-
-HR 在窗口中自行完成账号、密码和验证码登录。登录完成后检查：
-
-```powershell
 opencli moka status -f json
 ```
 
-当结果中出现 `"mokaLogin": "authenticated"` 后导出：
+看到下面的状态即可开始导出：
 
-```powershell
-opencli moka export-transcripts --output ".\moka-transcripts.json" -f json
+```json
+{
+  "mokaLogin": "authenticated"
+}
 ```
 
-macOS/Linux 可使用：
+## 日常使用
+
+登录完成后，日常只需要运行一次导出命令。
+
+Windows PowerShell：
+
+```powershell
+opencli moka export-transcripts `
+  --output "$HOME\Desktop\moka-transcripts.json" `
+  -f json
+```
+
+macOS：
 
 ```bash
-opencli moka export-transcripts --output "$PWD/moka-transcripts.json" -f json
+opencli moka export-transcripts \
+  --output "$HOME/Desktop/moka-transcripts.json" \
+  -f json
 ```
 
-输出目录已兼容 Windows 盘符根目录、Windows 普通目录和 macOS/Linux 路径。若目标 JSON 已存在，不会整体覆盖旧数据：以 `(applicationId, interviewId)` 为联合键更新已有面试，并将新面试追加到 `records`；`generatedAt`、`source`、`errors` 和 `stats` 更新为合并后的最新值。若已有文件不是有效导出 JSON，命令会停止写入，避免破坏原文件。
+工具会：
 
-也可以只导出某位候选人：
+1. 找到北京时间今天的全部面试候选人。
+2. 获取这些候选人在当前应聘记录下的全部面试。
+3. 获取每场面试的面试官和逐字稿。
+4. 将结果写入指定 JSON 文件。
 
-```powershell
-opencli moka export-transcripts --candidate "候选人姓名" --output ".\候选人面试记录.json" -f json
+今天没有面试时，`records` 可以为空。
+
+## 重复导出
+
+可以始终保存到同一个 JSON 文件。工具不会简单覆盖旧记录，而是按照下面的联合标识增量更新：
+
+```text
+applicationId + interviewId
 ```
 
-## 命令
+- 两个 ID 都相同：更新已有面试记录。
+- 任意一个 ID 不同：追加一条新面试记录。
+- `stats` 根据合并后的文件重新计算。
+- 已有文件格式不正确时停止写入，避免破坏原文件。
 
-| 命令 | 用途 |
-| --- | --- |
-| `opencli moka login` | 启动专用 Chrome 并打开 Moka |
-| `opencli moka status` | 检查浏览器与 Moka 登录状态 |
-| `opencli moka applications` | 获取今天有面试的应聘记录、候选人和岗位 |
-| `opencli moka interviews <applicationId>` | 获取全部面试及面试官 |
-| `opencli moka transcript <applicationId> <interviewId>` | 获取单场逐字稿 |
-| `opencli moka export-transcripts` | 导出今天涉及候选人的全部面试记录 |
+## 更新插件
 
-`interviewList` 的请求体模板会从 Moka 总览页的真实网络请求中自动捕获，以复用页面所需的未公开字段。首次捕获时，插件会监听当前正常加载的总览页，并只读点击一次列表底部的“加载更多”；捕获到请求体后缓存在当前标签页的专用 `sessionStorage` 键中。实际采集时会把时间范围明确覆盖为北京时间今天，并保留岗位等其他模板字段。后续命令直接复用缓存，不刷新页面，也不会读取或保存 Moka 的 Cookie、Token。
+```text
+opencli plugin update moka-transcripts
+```
 
-默认只发现“今天”的面试，不请求历史或未来：范围按北京时间动态计算，按开始时间升序，并自动遍历今天的全部分页。结果按 `applicationId` 去重；随后每个唯一应聘记录只调用一次 `interviewCard`，由该接口返回这条应聘记录至今的全部面试。只有显式传入高级调试参数 `--request-json` 时，才会按照用户提供的单一查询执行。
+更新 OpenCLI：
 
-重复执行 `opencli moka login` 时会优先复用并聚焦已经打开的 Moka 总览页或登录页，不会为每次状态检查重复创建 Moka 标签页。只有当前 CDP Chrome 中完全没有 Moka 页面时才新建标签页。
+```text
+npm install -g @jackwener/opencli@latest
+```
 
-仅当 `login` 本次确实新启动了专用 Chrome 时，插件会等待 Moka 首次加载约 1.5 秒，然后使用已有缓存自动刷新一次，以改善冷 Profile 未登录页面首次打开缓慢的问题。复用现有 Chrome、已登录页面以及后续数据命令都不会触发刷新。返回值中的 `refreshedAfterLaunch` 表示本次是否完成了这次补刷新。
+## 常见问题
 
-## 当前 OpenCLI 兼容方式
+### 提示无法连接 Moka 专用 Chrome
 
-OpenCLI 1.8.6 的普通网站 adapter 仍优先使用 Browser Bridge，尚不会因 `OPENCLI_CDP_ENDPOINT` 自动切换到直连 CDP。本插件因此注册为 OpenCLI 本地命令，并复用 OpenCLI 对外公开的 `CDPBridge` 连接专用 Chrome。OpenCLI 后续原生支持普通网站直连 CDP 后，可以移除这层兼容封装，不影响 Moka 数据解析和 Skill。
+重新打开登录窗口：
 
-接口与字段说明见 [reference/moka-interview-apis.md](reference/moka-interview-apis.md)。
+```text
+opencli moka login -f json
+```
 
-完整的开发、联调、回归和故障排查步骤见 [TESTING.md](TESTING.md)。
+### Moka 页面要求重新登录
+
+请在命令打开的专用 Chrome 中重新登录，然后再次执行导出命令。不要从浏览器开发者工具复制 Cookie 或 Token。
+
+### 页面首次打开比较慢
+
+首次启动会创建独立 Chrome 登录环境，可能比日常 Chrome 慢。工具会在首次启动时自动补刷新一次，后续会复用同一登录环境。
+
+### 某些面试没有逐字稿
+
+Moka 可能返回“数据不存在”。这通常表示该场面试尚未生成逐字稿、没有会议数据或当前账号无查看权限。其他面试仍会继续导出。
+
+### 输出文件包含什么
+
+每场面试在 `records` 中对应一条记录，主要字段包括：
+
+```text
+candidateName
+jobTitle
+applicationId
+interviewId
+interviewerNames
+roundName
+startTime
+transcript
+evaluationSummary
+questionAnalysis
+```
+
+## 数据安全
+
+- 只导出当前 Moka 账号有权访问的数据。
+- 密码、验证码、Cookie 和 Token 不会写入导出文件。
+- 逐字稿包含候选人个人信息，请只保存到公司允许的位置。
+- 不要把导出的 JSON 上传到公开网盘或提交到 GitHub。
+
+开发、测试和发布说明见 [TESTING.md](TESTING.md)。接口字段说明见 [reference/moka-interview-apis.md](reference/moka-interview-apis.md)。
