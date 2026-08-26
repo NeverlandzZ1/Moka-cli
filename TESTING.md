@@ -81,6 +81,7 @@ opencli plugin install .
 opencli plugin list -f json
 opencli moka login --help
 opencli moka status --help
+opencli moka mode --help
 opencli moka applications --help
 opencli moka interviews --help
 opencli moka transcript --help

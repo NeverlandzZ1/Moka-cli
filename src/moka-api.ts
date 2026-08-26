@@ -5,12 +5,75 @@ import { discoverInterviewListPayload } from './cdp.js';
 import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
 import type {
   ApplicationRecord,
+  HireMode,
+  HireModeResult,
   InterviewRecord,
   JsonRecord,
   MeetingSummaryRecord,
 } from './types.js';
 import { parseApplications, parseInterviews, parseMeetingSummary, readPagination } from './parsers.js';
 import { asString, isRecord } from './utils.js';
+
+const HIRE_MODE_VALUES: Record<HireMode, 1 | 2> = {
+  campus: 2,
+  social: 1,
+};
+
+const MODE_REFRESH_DELAY_MS = 2_000;
+
+export async function setHireMode(
+  page: IPage,
+  bridge: CDPBridge,
+  mode: HireMode,
+): Promise<HireModeResult> {
+  const currentHireMode = HIRE_MODE_VALUES[mode];
+  const response = await page.evaluate(async ({ path, value }) => {
+    const httpResponse = await fetch(path, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentHireMode: value }),
+    });
+    const text = await httpResponse.text();
+    let json: unknown;
+    if (text) {
+      try { json = JSON.parse(text); } catch { /* Moka normally returns text/plain here. */ }
+    }
+    return {
+      ok: httpResponse.ok,
+      status: httpResponse.status,
+      statusText: httpResponse.statusText,
+      text,
+      json,
+    };
+  }, { path: API_PATHS.updateCurrentHireMode, value: currentHireMode });
+
+  if (!response.ok) {
+    if (isRecord(response.json)) assertApiResponse(response.json, 'update_currenthiremode_fields');
+    const detail = response.text.trim() || response.statusText || 'unknown error';
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthRequiredError('app.mokahr.com', `Moka 登录状态已失效：HTTP ${response.status} ${detail}`);
+    }
+    throw new CommandExecutionError(
+      `Moka update_currenthiremode_fields 失败：HTTP ${response.status} ${detail}`,
+    );
+  }
+  if (isRecord(response.json)) assertApiResponse(response.json, 'update_currenthiremode_fields');
+
+  // Page.navigate to the current SPA URL is not equivalent to Chrome's refresh
+  // button. Use CDP Page.reload twice because Moka's first reload can stall while
+  // rebuilding its mode-dependent application state.
+  await bridge.send('Page.enable');
+  await bridge.send('Page.reload');
+  await new Promise((resolve) => setTimeout(resolve, MODE_REFRESH_DELAY_MS));
+  await bridge.send('Page.reload');
+
+  return {
+    mode,
+    modeLabel: mode === 'campus' ? '校招' : '社招',
+    currentHireMode,
+  };
+}
 
 function assertApiResponse(response: unknown, endpoint: string): void {
   if (!isRecord(response)) {

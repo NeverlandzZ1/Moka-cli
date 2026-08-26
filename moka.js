@@ -6,6 +6,7 @@ import { ArgumentError } from "@jackwener/opencli/errors";
 var MOKA_ORIGIN = "https://app.mokahr.com";
 var MOKA_OVERVIEW_URL = `${MOKA_ORIGIN}/interviews/overview`;
 var API_PATHS = {
+  updateCurrentHireMode: "/api/users/update_currenthiremode_fields",
   interviewList: "/api/outer/ats-interview/interview/hr/interviewList",
   interviewCard: "/api/outer/ats-interview/interview/interviewCard",
   meetingSummary: "/api/outer/ats-interview/interview/meeting/getMeetingSummary"
@@ -486,6 +487,57 @@ function parseMeetingSummary(response) {
 }
 
 // src/moka-api.ts
+var HIRE_MODE_VALUES = {
+  campus: 2,
+  social: 1
+};
+var MODE_REFRESH_DELAY_MS = 2e3;
+async function setHireMode(page, bridge, mode) {
+  const currentHireMode = HIRE_MODE_VALUES[mode];
+  const response = await page.evaluate(async ({ path, value }) => {
+    const httpResponse = await fetch(path, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentHireMode: value })
+    });
+    const text = await httpResponse.text();
+    let json;
+    if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch {
+      }
+    }
+    return {
+      ok: httpResponse.ok,
+      status: httpResponse.status,
+      statusText: httpResponse.statusText,
+      text,
+      json
+    };
+  }, { path: API_PATHS.updateCurrentHireMode, value: currentHireMode });
+  if (!response.ok) {
+    if (isRecord(response.json)) assertApiResponse(response.json, "update_currenthiremode_fields");
+    const detail = response.text.trim() || response.statusText || "unknown error";
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthRequiredError("app.mokahr.com", `Moka \u767B\u5F55\u72B6\u6001\u5DF2\u5931\u6548\uFF1AHTTP ${response.status} ${detail}`);
+    }
+    throw new CommandExecutionError(
+      `Moka update_currenthiremode_fields \u5931\u8D25\uFF1AHTTP ${response.status} ${detail}`
+    );
+  }
+  if (isRecord(response.json)) assertApiResponse(response.json, "update_currenthiremode_fields");
+  await bridge.send("Page.enable");
+  await bridge.send("Page.reload");
+  await new Promise((resolve2) => setTimeout(resolve2, MODE_REFRESH_DELAY_MS));
+  await bridge.send("Page.reload");
+  return {
+    mode,
+    modeLabel: mode === "campus" ? "\u6821\u62DB" : "\u793E\u62DB",
+    currentHireMode
+  };
+}
 function assertApiResponse(response, endpoint) {
   if (!isRecord(response)) {
     throw new AuthRequiredError("app.mokahr.com", `${endpoint} \u6CA1\u6709\u8FD4\u56DE JSON\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55 Moka`);
@@ -701,6 +753,13 @@ function optionalRequestBody(value) {
   if (typeof value !== "string" || !value.trim()) return void 0;
   return parseJsonObject(value, "--request-json");
 }
+function hireModeArg(value) {
+  if (typeof value !== "string") throw new ArgumentError("mode \u5FC5\u987B\u662F campus/social \u6216\u6821\u62DB/\u793E\u62DB");
+  const normalized = value.trim().toLocaleLowerCase();
+  if (normalized === "campus" || normalized === "\u6821\u62DB" || normalized === "1") return "campus";
+  if (normalized === "social" || normalized === "\u793E\u62DB" || normalized === "2") return "social";
+  throw new ArgumentError(`\u4E0D\u652F\u6301\u7684 Moka \u62DB\u8058\u6A21\u5F0F: ${value}\u3002\u8BF7\u4F7F\u7528 campus \u6216 social`);
+}
 function collectionOptions(kwargs) {
   const candidateName = typeof kwargs.candidate === "string" && kwargs.candidate.trim() ? kwargs.candidate.trim() : void 0;
   const requestBody = optionalRequestBody(kwargs.requestJson);
@@ -757,6 +816,25 @@ cli({
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page) => [await probeMokaLogin(page)]
+  )
+});
+cli({
+  site: "moka",
+  name: "mode",
+  description: "\u5207\u6362 Moka \u5F53\u524D\u62DB\u8058\u6A21\u5F0F\uFF08\u6821\u62DB/\u793E\u62DB\uFF09",
+  access: "write",
+  example: "opencli moka mode campus -f json",
+  strategy: Strategy.LOCAL,
+  browser: false,
+  defaultFormat: "json",
+  args: [
+    { name: "mode", positional: true, required: true, help: "campus\uFF08\u6821\u62DB\uFF09\u6216 social\uFF08\u793E\u62DB\uFF09" },
+    commonPortArg
+  ],
+  columns: ["mode", "modeLabel", "currentHireMode"],
+  func: async (kwargs) => withMokaPage(
+    intArg(kwargs.port, DEFAULT_CDP_PORT),
+    async (page, bridge) => [await setHireMode(page, bridge, hireModeArg(kwargs.mode))]
   )
 });
 cli({

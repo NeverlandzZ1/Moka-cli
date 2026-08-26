@@ -3,3 +3,4 @@ coverage/
 *.log
 moka-transcripts-*.json
 moka-transcripts.json
+download/

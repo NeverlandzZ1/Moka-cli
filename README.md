@@ -1,8 +1,8 @@
 # Moka Transcript Getter
 
-面向 HR 的 Moka 面试记录导出工具。登录 Moka 后，一条命令即可导出今天涉及候选人的：
-
 项目地址：[NeverlandzZ1/Moka-cli](https://github.com/NeverlandzZ1/Moka-cli)
+
+面向 HR 的 Moka 面试记录导出工具。登录 Moka 后，一条命令即可导出今天涉及候选人的：
 
 - 候选人姓名和应聘岗位
 - 全部面试轮次及面试官
@@ -78,6 +78,17 @@ opencli moka status -f json
   "mokaLogin": "authenticated"
 }
 ```
+
+### 切换校招或社招
+
+导出前可以切换 Moka 当前的招聘模式：
+
+```powershell
+opencli moka mode campus -f json   # 校招
+opencli moka mode social -f json   # 社招
+```
+
+也可以直接使用 `校招` 或 `社招`。切换成功后，命令会间隔短暂时间刷新当前 Moka 页面两次，使界面和后续导出同时进入对应模式；导出命令会读取该模式下的今日面试。
 
 ## 日常使用
 

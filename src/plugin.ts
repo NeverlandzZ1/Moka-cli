@@ -4,9 +4,9 @@ import { API_PATHS, DEFAULT_CDP_PORT, MOKA_OVERVIEW_URL } from './constants.js';
 import { ensureChromeWithCdp } from './chrome.js';
 import { probeMokaLogin, withMokaPage } from './cdp.js';
 import { collectTranscripts, writeCollection } from './collector.js';
-import { getMeetingSummary, listApplications, listInterviews } from './moka-api.js';
+import { getMeetingSummary, listApplications, listInterviews, setHireMode } from './moka-api.js';
 import { parseJsonObject } from './utils.js';
-import type { ApplicationRecord, Id, JsonRecord } from './types.js';
+import type { ApplicationRecord, HireMode, Id, JsonRecord } from './types.js';
 
 const commonPortArg = {
   name: 'port',
@@ -30,6 +30,14 @@ function idArg(value: unknown, name: string): Id {
 function optionalRequestBody(value: unknown): JsonRecord | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   return parseJsonObject(value, '--request-json');
+}
+
+function hireModeArg(value: unknown): HireMode {
+  if (typeof value !== 'string') throw new ArgumentError('mode 必须是 campus/social 或校招/社招');
+  const normalized = value.trim().toLocaleLowerCase();
+  if (normalized === 'campus' || normalized === '校招' || normalized === '1') return 'campus';
+  if (normalized === 'social' || normalized === '社招' || normalized === '2') return 'social';
+  throw new ArgumentError(`不支持的 Moka 招聘模式: ${value}。请使用 campus 或 social`);
 }
 
 function collectionOptions(kwargs: Record<string, unknown>): {
@@ -95,6 +103,26 @@ cli({
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page) => [await probeMokaLogin(page)],
+  ),
+});
+
+cli({
+  site: 'moka',
+  name: 'mode',
+  description: '切换 Moka 当前招聘模式（校招/社招）',
+  access: 'write',
+  example: 'opencli moka mode campus -f json',
+  strategy: Strategy.LOCAL,
+  browser: false,
+  defaultFormat: 'json',
+  args: [
+    { name: 'mode', positional: true, required: true, help: 'campus（校招）或 social（社招）' },
+    commonPortArg,
+  ],
+  columns: ['mode', 'modeLabel', 'currentHireMode'],
+  func: async (kwargs) => withMokaPage(
+    intArg(kwargs.port, DEFAULT_CDP_PORT),
+    async (page, bridge) => [await setHireMode(page, bridge, hireModeArg(kwargs.mode))],
   ),
 });
 

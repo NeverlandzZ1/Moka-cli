@@ -1,6 +1,14 @@
 export type Id = string | number;
 export type JsonRecord = Record<string, unknown>;
 
+export type HireMode = 'campus' | 'social';
+
+export interface HireModeResult {
+  mode: HireMode;
+  modeLabel: '校招' | '社招';
+  currentHireMode: 1 | 2;
+}
+
 export interface ApplicationRecord {
   applicationId: Id;
   candidateName: string;

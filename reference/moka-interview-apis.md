@@ -1,6 +1,6 @@
 # Moka 面试逐字稿接口说明
 
-本文只记录完成面试逐字稿采集所需的三个接口，以及它们之间的调用关系。
+本文记录完成面试逐字稿采集所需的三个读取接口、一个招聘模式切换接口，以及它们之间的调用关系。
 
 ## 共同前提
 
@@ -8,8 +8,28 @@
 - 调用账号拥有相应候选人和面试数据的查看权限。
 - 建议通过 Chrome CDP 在已登录的 Moka 页面上下文中发起同源请求，让浏览器自动携带登录态。
 - 不读取、导出或持久化 Cookie、JWT、`moka-token`、`csrfCk`、`connect.sid` 等会话凭据。
-- 三个接口均为 `POST`，请求头至少使用 `Content-Type: application/json`。
+- 三个读取接口均为 `POST`；模式切换接口为 `PUT`。请求头至少使用 `Content-Type: application/json`。
 - HTTP `200` 仅表示请求到达服务端，还要检查响应中的 `code`、`success` 和 `msg`。
+
+---
+
+## 0. 切换招聘模式：`update_currenthiremode_fields`
+
+```http
+PUT https://app.mokahr.com/api/users/update_currenthiremode_fields
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+{ "currentHireMode": 2 }
+```
+
+- `1`：社招（`social`）
+- `2`：校招（`campus`）
+
+该接口切换当前账号的招聘模式。切换后，后续三个读取接口的路径不变，但返回数据跟随当前模式。Moka 是单页应用，仅调用接口不会更新当前页面的内存状态和菜单；同 URL 导航也不等同于刷新按钮。实际测试中第一次刷新还可能停在慢加载状态，因此插件会通过 CDP 的 `Page.reload` 间隔短暂时间执行两次真正的浏览器刷新。它使用已登录 Moka Chrome 的会话，不应在命令或文档中硬编码 Cookie/Token。
 
 ---
 
