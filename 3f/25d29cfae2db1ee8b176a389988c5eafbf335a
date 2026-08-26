@@ -1,0 +1,14 @@
+.gitignore
+  h_3279bd1d34f6be 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "3f25d29cfae2db1ee8b176a389988c5eafbf335a",
+  "prompts": {},
+  "humans": {
+    "h_3279bd1d34f6be": {
+      "author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
