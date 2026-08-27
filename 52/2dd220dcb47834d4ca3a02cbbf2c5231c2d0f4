@@ -1,0 +1,25 @@
+skills/pack.py
+  s_370d1b890ef8ca::t_e4d91fd71f7b22 1-27,29-37
+  s_370d1b890ef8ca::t_e672b4386eb1fe 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "522dd220dcb47834d4ca3a02cbbf2c5231c2d0f4",
+  "prompts": {},
+  "humans": {
+    "h_3279bd1d34f6be": {
+      "author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  },
+  "sessions": {
+    "s_370d1b890ef8ca": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49861dc3-1faf-45a0-b15e-af5ef5a3e843",
+        "model": "arn:aws:bedrock:us-west-2:296122126678:application-inference-profile/uxc50ltr1528"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
