@@ -211,11 +211,14 @@ opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f j
 
 确认导出成功后，立即以该 JSON 为输入，严格执行 `references/lark-base-write.md` 的全部步骤：
 
-- 从飞书「面试转写」表分页读取全部已有记录。
-- 以 `applicationId + interviewId` 联合键区分新增和更新；重复项用新数据覆盖飞书旧记录。
+- 先把 `applicationId`、`interviewId` 规范化为整数，并按这两个 ID 对本次输入 JSON 自身去重；同键只保留最后一条。
+- 每条记录都用「申请ID AND 面试ID」两个 number 字段精确查询飞书，以 `applicationId + interviewId` 联合键区分新增和更新。
+- 真正创建前再次执行相同的双字段云端精确查询；查询到记录就改为更新，禁止继续创建。
+- 云端同一联合键已有多条时，只更新一条 canonical 记录，不新增、不自动删除，并在结果中列出该联合键和全部重复 `record_id`。
 - 精确匹配或创建面试官。
-- 写入全部 16 个普通字段。
+- 用当前 `{"create_records":[...]}` 请求格式写入全部 16 个普通字段，同一 Base 的创建批次不得并发执行。
 - 单独 upsert `面试官（关联）`。
+- 不得把未提供 `--record-id` 的 `record-upsert` 当作业务联合键 upsert；更新必须使用精确查询返回的真实 `record_id`。
 - 所有 lark-cli 命令使用 `--as user --format json`。
 - 大 JSON 使用 CLI 工作目录下的相对临时文件或 stdin，不能把绝对路径传给 lark-cli 的 `@file`。
 - 只有 lark-cli 退出码 0/`ok == true` 且新增、更新、关联步骤都完成，才算校招落库成功。
@@ -244,14 +247,22 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrit
 每条本次处理的记录只汇报：
 
 ```text
-候选人：<candidateName>｜面试官：<interviewerNames，以顿号连接；缺失时写“未记录”>｜岗位：<jobTitle>
+候选人：<脱敏后的 candidateName>｜面试官：<脱敏后的 interviewerNames，以顿号连接；缺失时写“未记录”>｜岗位：<jobTitle>
 ```
+
+姓名脱敏规则：
+
+- 中文姓名保留姓氏，其余字符替换为 `*`：`张三` → `张*`，`王小明` → `王**`；单字姓名显示 `*`。
+- 英文姓名的每个单词只保留首字母，其余字符替换为 `*`：`Alice Smith` → `A**** S****`。
+- 中英文组合姓名分别按上述规则处理。
+- 真实姓名只允许写入本 Skill 固定配置且用户已授权的飞书 Base。不得在聊天回复、定时任务摘要、错误信息、调试日志或临时请求文件名中输出真实姓名。
 
 最后汇报：
 
 - 校招、社招分别是否导出成功、是否写入飞书成功
 - 本次去重后的记录数
 - 飞书新增面试官数、新增面试记录数、更新面试记录数、跳过数
+- 表内已有重复冲突数；若大于 0，列出每组 `applicationId + interviewId` 和全部重复 `record_id`，并说明未自动删除
 - 上述每条简要信息
 - JSON 的绝对保存路径，并说明该文件只保留最后一次成功导出的单模式数据
 - 飞书 Base 链接
@@ -265,5 +276,6 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrit
 - 不使用 mitmproxy 完成日常采集；不要求用户提供抓包或凭证。
 - 不把 JSON 数据文件写进插件仓库或 Skill 目录。
 - 只把候选人数据写入本 Skill 固定配置的飞书 Base；不上传或发送到其他位置。
+- 对话汇报、自动化摘要、错误信息和调试日志中的候选人及面试官姓名必须脱敏；不得输出手机号、邮箱、身份证号或逐字稿正文。
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
-- 默认 JSON 是单次中转文件，不再承担历史存储；历史去重与覆盖由飞书 Base 中的 `applicationId + interviewId` 联合键负责。
+- 默认 JSON 是单次中转文件，不再承担历史存储；历史去重与覆盖由飞书 Base 中对 `applicationId + interviewId` 的双 number 字段精确查询、创建前复查和串行写入共同保证。

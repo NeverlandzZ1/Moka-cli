@@ -18,7 +18,7 @@
 
 | 字段名 | 类型 | 说明 |
 |---|---|---|
-| 姓名 | text | 面试官姓名（含英文名和中文名），如 "Olivia Chen （陈惠馨）" |
+| 姓名 | text | 面试官姓名（含英文名和中文名），如 "Interviewer A（示例面试官）" |
 | 工号 | text | 工号（如有） |
 | 部门 | text | 部门（如有） |
 | 岗位 | text | 岗位（如有） |
@@ -62,16 +62,16 @@
   "records": [
     {
       "applicationId": 832453033,
-      "candidateName": "郭雨萱",
+      "candidateName": "示例候选人",
       "jobTitle": "运营实习生（本地化方向）",
       "jobId": "e27c4530-518b-4a6e-a759-29b919a7ea1a",
       "interviewId": 48346354,
-      "interviewerNames": ["Olivia Chen （陈惠馨）"],
+      "interviewerNames": ["Interviewer A（示例面试官）"],
       "round": 1,
       "roundName": "第一轮面试",
       "startTime": 1787711400000,
       "transcriptStatus": "available",
-      "transcript": "郭雨萱(00:01:14): 你好。\n\nOlivia Chen...(完整逐字稿)",
+      "transcript": "<完整逐字稿示例省略>",
       "transcriptType": 1,
       "evaluationSummary": "### 综合评价\n...(完整评估)",
       "questionAnalysis": {
@@ -113,42 +113,57 @@
 
 **去重规则：`interviewId` 和 `applicationId` 同时完全相同才算重复。**
 
-1. 从「面试转写」表（`tblUYL6KszcCEzuw`）读取现有所有记录：
+1. 先对输入 JSON 自身去重。将 `applicationId`、`interviewId` 都规范化为 JSON number，再以 `String(Number(applicationId)) + ":" + String(Number(interviewId))` 作为联合键构建 Map；同一输入中联合键重复时只保留最后一条。缺少 ID、不是有限数字或无法无损转成整数的记录停止写入并报错。
+
+2. 对每条去重后的输入记录，在「面试转写」表（`tblUYL6KszcCEzuw`）用两个 number 字段同时精确查询。不要用关键词搜索，不要只查其中一个 ID：
 
 ```bash
 lark-cli base +record-list \
   --base-token TeB3bU3ltak2MWsD8I0cdoxPnSf \
   --table-id tblUYL6KszcCEzuw \
+  --filter-json '{"logic":"and","conditions":[["申请ID","==",832847768],["面试ID","==",48371949]]}' \
+  --field-id 申请ID \
+  --field-id 面试ID \
+  --limit 20 \
   --as user --format json
 ```
 
-如果记录较多（超过 500 条），分页读取直到 `has_more=false`。
+将示例数字替换为当前记录的规范化 number。若 `has_more=true`，继续分页直到读完所有精确匹配。
 
-2. 从返回结果中提取每条记录的 `面试ID` 和 `申请ID` 字段值，构建已有记录的 `(interviewId, applicationId)` 去重集合。
+3. 按精确查询结果分流：
+   - **0 条**：暂列为 `toCreate`。
+   - **1 条**：列为 `toUpdate`，保存真实 `record_id`。
+   - **超过 1 条**：这是表内已有脏重复。禁止继续创建；选择最早返回的一条作为 canonical `toUpdate`，记录其余重复 `record_id` 到 `duplicateConflicts` 并明确报告。定时任务不得未经用户授权删除记录。
 
-3. 遍历输入 JSON 的 `records` 数组，对每条记录检查其 `(interviewId, applicationId)` 是否已存在于去重集合中：
-   - **如果已存在（两个值都相同）**：该条记录为重复，用新数据**覆盖**旧记录（先删旧记录或 upsert 更新）。
-   - **如果不存在**：该条记录为新增，直接写入。
+4. 真正执行 create 前，对每个 `toCreate` 联合键再执行一次相同的双字段精确查询：
+   - 二次查询仍为 0 条才允许创建。
+   - 已出现 1 条则改入 `toUpdate`。
+   - 已出现多条则进入 `duplicateConflicts`，不再创建。
 
-4. 最终得到两个列表：
+5. 最终得到三个列表：
    - `toUpdate`：需要更新的记录（含旧 record_id）
-   - `toCreate`：需要新增的记录
+   - `toCreate`：经过二次查询仍不存在、需要新增的记录
+   - `duplicateConflicts`：表内已经存在多个相同联合键的异常记录
+
+6. 每成功创建一条，立即把联合键和新 `record_id` 加入本轮内存索引；后续不得再次创建该联合键。禁止并发执行同一 Base 的创建批次。
 
 ### 第2步：处理面试官（新增或匹配）
 
 对每条面试记录中的 `interviewerNames` 数组的每个面试官名：
 
-1. 在「面试官信息」表（`tblyYe2fDhI0Lluv`）中按 `姓名` 字段搜索：
+1. 在「面试官信息」表（`tblyYe2fDhI0Lluv`）中按 `姓名` text 字段精确筛选：
 
 ```bash
-lark-cli base +record-search \
+lark-cli base +record-list \
   --base-token TeB3bU3ltak2MWsD8I0cdoxPnSf \
   --table-id tblyYe2fDhI0Lluv \
-  --filter '{"conjunction":"and","conditions":[{"field_name":"姓名","operator":"is","value":["<面试官名>"]}]}' \
+  --filter-json '{"logic":"and","conditions":[["姓名","==","<面试官名>"]]}' \
+  --field-id 姓名 \
+  --limit 20 \
   --as user --format json
 ```
 
-2. **如果搜到**：记录该面试官的 `record_id`，后面用于关联。
+2. **如果精确命中 1 条**：记录该面试官的 `record_id`，后面用于关联。命中多条时不得再创建，使用 canonical 记录并报告已有重复。
 
 3. **如果没搜到**：在「面试官信息」表中新增一条记录，`姓名` 字段填面试官全名：
 
@@ -156,7 +171,7 @@ lark-cli base +record-search \
 lark-cli base +record-batch-create \
   --base-token TeB3bU3ltak2MWsD8I0cdoxPnSf \
   --table-id tblyYe2fDhI0Lluv \
-  --json '{"fields":["姓名"],"rows":[["<面试官名>"]]}' \
+  --json '{"create_records":[{"姓名":"<面试官名>"}]}' \
   --as user --format json
 ```
 
@@ -168,35 +183,29 @@ lark-cli base +record-batch-create \
 
 #### 3a. 批量新增记录（toCreate）
 
-1. 将 `toCreate` 列表转换为 `+record-batch-create` 所需格式：
+1. 将 `toCreate` 列表转换为当前 `+record-batch-create` 所需的 `create_records` 格式：
 
 ```json
 {
-  "fields": [
-    "候选人姓名", "岗位名称", "面试官", "面试轮次",
-    "面试开始时间", "转写状态", "逐字稿", "评估总结",
-    "问题分析", "Moka码", "Moka消息", "申请ID",
-    "岗位ID", "面试ID", "轮次序号", "转写类型"
-  ],
-  "rows": [
-    [
-      "郭雨萱",
-      "运营实习生（本地化方向）",
-      "Olivia Chen （陈惠馨）",
-      "第一轮面试",
-      "2026-08-26 02:30:00",
-      "available",
-      "逐字稿全文...",
-      "评估总结全文...",
-      "{JSON字符串}",
-      "",
-      "成功",
-      832453033,
-      "e27c4530-518b-4a6e-a759-29b919a7ea1a",
-      48346354,
-      1,
-      1
-    ]
+  "create_records": [
+    {
+      "候选人姓名": "示例候选人",
+      "岗位名称": "运营实习生（本地化方向）",
+      "面试官": "Interviewer A（示例面试官）",
+      "面试轮次": "第一轮面试",
+      "面试开始时间": "2026-08-26 02:30:00",
+      "转写状态": "available",
+      "逐字稿": "逐字稿全文...",
+      "评估总结": "评估总结全文...",
+      "问题分析": "{JSON字符串}",
+      "Moka码": "",
+      "Moka消息": "成功",
+      "申请ID": 832453033,
+      "岗位ID": "e27c4530-518b-4a6e-a759-29b919a7ea1a",
+      "面试ID": 48346354,
+      "轮次序号": 1,
+      "转写类型": 1
+    }
   ]
 }
 ```
@@ -232,9 +241,9 @@ lark-cli base +record-upsert \
 
 ```json
 {
-  "候选人姓名": "郭雨萱",
+  "候选人姓名": "示例候选人",
   "岗位名称": "运营实习生（本地化方向）",
-  "面试官": "Olivia Chen （陈惠馨）",
+  "面试官": "Interviewer A（示例面试官）",
   "面试轮次": "第一轮面试",
   "面试开始时间": "2026-08-26 02:30:00",
   "转写状态": "available",
@@ -274,6 +283,7 @@ lark-cli base +record-upsert \
    - 新增面试记录：X 条
    - 更新面试记录（覆盖）：X 条
    - 跳过（无变化）：X 条
+   - 表内已有重复冲突：X 组（逐组列出 `applicationId + interviewId` 以及全部重复 `record_id`）
 
 2. 给用户 Base 的链接：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
 
@@ -281,11 +291,11 @@ lark-cli base +record-upsert \
 
 ## 重要注意事项
 
-1. **去重逻辑**：只有 `interviewId` AND `applicationId` 两个值同时完全相同才算重复。只要有一个不同，就视为新记录。
+1. **去重逻辑**：先把两个 ID 规范化为整数并对输入 JSON 自身去重；再用 `applicationId AND interviewId` 两个 number 字段对飞书执行精确查询。只有两个值同时相同才算同一面试，只要有一个不同就是新记录。真正创建前必须再次执行同样的云端精确查询，不能只依赖流程开始时读取的快照。
 
 2. **覆盖逻辑**：重复记录不是跳过，而是用新数据覆盖旧数据（新覆盖旧）。
 
-3. **面试官匹配**：按 `interviewerNames` 中的完整字符串匹配，包括英文名和中文名。如 "Olivia Chen （陈惠馨）" 是完整匹配，不做模糊搜索。
+3. **面试官匹配**：按 `interviewerNames` 中的完整字符串匹配，包括英文名和中文名。如 "Interviewer A（示例面试官）" 是完整匹配，不做模糊搜索。
 
 4. **关联字段**：`面试官（关联）` 是 link 类型，不能在 `+record-batch-create` 中写入，必须在创建记录后用 `+record-upsert` 单独更新。
 
@@ -295,11 +305,13 @@ lark-cli base +record-upsert \
 
 7. **interviewerNames**：是字符串数组，写入「面试官」文本字段时用 `", "` 拼接；但在关联时每个面试官单独匹配。
 
-8. **大数据量**：`+record-batch-create` 单次最多 200 行，超过需分批。`--json` 内容过大时用 `@文件名` 方式传入（文件需放在 CLI 的工作目录下）。
+8. **大数据量**：`+record-batch-create` 单次最多 200 条，超过需分批；请求体使用 `{"create_records":[...]}`。`--json` 内容过大时用 `@文件名` 方式传入（文件需放在 CLI 的工作目录下）。同一个 Base 的创建批次不得并发执行。
 
-9. **空值处理**：空单元格在 batch-create 的 rows 中用 `null` 填充。
+9. **空值处理**：空单元格在 batch-create 的 `create_records` 字段对象中用 `null` 填充。
 
-10. **授权**：所有 CLI 命令都要加 `--as user`，确保以用户身份操作。
+10. **已有脏重复**：精确查询返回多条时，禁止继续创建。选择一条 canonical 记录覆盖更新，并报告该联合键及所有重复 `record_id`；定时任务不得自行删除已有记录。
+
+11. **授权**：所有 CLI 命令都要加 `--as user`，确保以用户身份操作。
 
 ---
 
@@ -307,7 +319,7 @@ lark-cli base +record-upsert \
 
 | 字段类型 | CellValue 格式 | 示例 |
 |---|---|---|
-| text | 字符串 | `"郭雨萱"` |
+| text | 字符串 | `"示例候选人"` |
 | number | JSON number | `832453033` |
 | datetime | "YYYY-MM-DD HH:mm:ss" | `"2026-08-26 02:30:00"` |
 | link | 对象数组 | `[{"id":"recvttC25dY6DI"}]` |
@@ -321,11 +333,11 @@ lark-cli base +record-upsert \
 ```json
 {
   "applicationId": 832453033,
-  "candidateName": "郭雨萱",
+  "candidateName": "示例候选人",
   "jobTitle": "运营实习生（本地化方向）",
   "jobId": "e27c4530-518b-4a6e-a759-29b919a7ea1a",
   "interviewId": 48346354,
-  "interviewerNames": ["Olivia Chen （陈惠馨）"],
+  "interviewerNames": ["Interviewer A（示例面试官）"],
   "round": 1,
   "roundName": "第一轮面试",
   "startTime": 1787711400000,
@@ -341,9 +353,10 @@ lark-cli base +record-upsert \
 
 处理步骤：
 
-1. ✅ 检查 `(48346354, 832453033)` 是否已存在 → 假设不存在
-2. ✅ 搜索面试官 "Olivia Chen （陈惠馨）" → 假设已存在，record_id = `recvttC25dY6DI`
-3. ✅ 批量写入面试转写记录，返回新 record_id = `recvXXXXX`
-4. ✅ upsert 关联：`{"面试官（关联）":[{"id":"recvttC25dY6DI"}]}`
-5. ✅ 完成
-
+1. ✅ 将 ID 规范化为 number，并按 `(832453033, 48346354)` 对输入 JSON 自身去重
+2. ✅ 用「申请ID = 832453033 AND 面试ID = 48346354」精确查询飞书 → 假设不存在
+3. ✅ 搜索面试官 "Interviewer A（示例面试官）" → 假设已存在，record_id = `recvttC25dY6DI`
+4. ✅ 创建前再次用两个 number 字段精确查询 → 仍不存在
+5. ✅ 用 `create_records` 批量写入面试转写记录，返回新 record_id = `recvXXXXX`
+6. ✅ upsert 关联：`{"面试官（关联）":[{"id":"recvttC25dY6DI"}]}`
+7. ✅ 将联合键和 `recvXXXXX` 加入本轮内存索引，完成
