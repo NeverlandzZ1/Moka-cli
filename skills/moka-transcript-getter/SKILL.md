@@ -1,11 +1,11 @@
 ---
 name: moka-transcript-getter
-description: 为 HR 配置并运行 Moka 面试转写采集。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/Moka 插件并登录，或收到“定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。”时；支持首次环境安装、打开 CDP Chrome 等待人工登录、可选创建定时任务，以及定时抓取今日校招和社招的候选人、岗位、面试官与逐字稿并增量保存。
+description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到“定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。”时；支持环境安装、Moka CDP 登录、飞书用户授权、可选创建定时任务，以及定时分别覆盖导出校招和社招 JSON 后去重写入飞书 Base。
 ---
 
 # Moka Transcript Getter
 
-只处理用户有权访问的 Moka 数据。通过本机 CDP Chrome 的已登录会话调用插件；绝不读取、复制、输出或持久化 Cookie、JWT、密码、验证码等凭证。
+只处理用户有权访问的 Moka 和飞书数据。通过本机 CDP Chrome 的已登录会话读取 Moka，通过 lark-cli 用户身份写入飞书 Base；绝不读取、复制、输出或持久化 Cookie、JWT、access token、密码、验证码等凭证。
 
 ## 路由
 
@@ -17,6 +17,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集。用于用户明确
 ## 固定配置
 
 - OpenCLI 插件仓库：`github:NeverlandzZ1/Moka-cli`
+- lark-cli 官方包：`@larksuite/cli`
 - CDP 默认端口：`9222`
 - 逻辑输出路径：`~/.opencli/mokaData/transcript.json`
 - Windows 实际路径：`$env:USERPROFILE\.opencli\mokaData\transcript.json`
@@ -25,6 +26,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集。用于用户明确
 - 定时任务指令：`定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。`
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`Tripyoyo`
+- 飞书 Base：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
+- 飞书写入规范：`references/lark-base-write.md`
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
 
@@ -32,7 +35,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集。用于用户明确
 
 ### 1. 探测并补齐环境
 
-识别操作系统，依次检查 Chrome、Node.js、npm、Git、OpenCLI 和 Moka 插件。已有且可用时跳过安装，不要重复破坏现有环境。
+识别操作系统，依次检查 Chrome、Node.js、npm、Git、OpenCLI、Moka 插件和 lark-cli。已有且可用时跳过安装，不要重复破坏现有环境。
 
 最低要求：
 
@@ -42,6 +45,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集。用于用户明确
 - Git
 - `@jackwener/opencli@latest`
 - Moka 插件
+- `@larksuite/cli@latest`
 
 先执行只读检查：
 
@@ -51,6 +55,8 @@ npm --version
 git --version
 opencli --version
 opencli plugin list -f json
+lark-cli --version
+lark-cli auth status --json --verify
 ```
 
 缺少 Node.js 或 Git 时，使用当前系统可用的官方/系统包管理方式安装：
@@ -79,17 +85,54 @@ opencli plugin install github:NeverlandzZ1/Moka-cli
 opencli plugin update moka-transcripts
 ```
 
+安装 lark-cli：
+
+```text
+npx @larksuite/cli@latest install
+```
+
+lark-cli 已存在时使用 `lark-cli update` 更新，不要用不明来源的同名 npm 包替换。
+
 最后验证：
 
 ```text
 opencli plugin list -f json
 opencli moka login --help
 opencli moka export-transcripts --help
+lark-cli --version
+lark-cli doctor
 ```
 
 若某个安装步骤失败，先诊断并尝试安全的替代安装方式；仍失败则明确报告失败项和人工处理方法，不要继续假装环境可用。
 
-### 2. 打开登录窗口并暂停
+### 2. 配置并授权 lark-cli
+
+先执行 `lark-cli auth status --json --verify`。只有 user 身份已验证且能访问目标 Base 才可跳过配置与授权。
+
+若尚未初始化配置，在后台启动：
+
+```text
+lark-cli config init --new
+```
+
+从输出提取授权 URL，保持 URL 原样；调用 `lark-cli auth qrcode <URL> --output "./lark-config-auth.png"` 生成二维码，同时把 URL 和二维码展示给用户，并暂停等待用户完成配置。不要要求用户提供 App Secret。
+
+配置完成但 user 身份未授权时，使用 split-flow：
+
+```text
+lark-cli auth login --domain base --no-wait --json
+```
+
+提取 `verification_url` 和 `device_code`，用 `lark-cli auth qrcode` 生成二维码，将原始 URL 与二维码展示给用户，然后暂停。用户回复已授权后，由 Agent 执行：
+
+```text
+lark-cli auth login --device-code <本次流程返回的device_code>
+lark-cli auth status --json --verify
+```
+
+所有飞书操作使用 `--as user`。判断 lark-cli 成功必须使用退出码 0 或 JSON 的 `ok == true`，不能用旧式 `code == 0`。如返回缺失 scope，按错误中的 `missing_scopes` 发起最小增量授权；不得输出 access token。
+
+### 3. 打开 Moka 登录窗口并暂停
 
 执行：
 
@@ -99,7 +142,7 @@ opencli moka login -f json
 
 该命令应打开使用独立用户目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复“登录好了”。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
 
-### 3. 用户回复登录完成后验证
+### 4. 用户回复 Moka 登录完成后验证
 
 执行：
 
@@ -109,9 +152,9 @@ opencli moka status -f json
 
 只有输出包含 `mokaLogin: authenticated` 才算成功。否则让用户继续在已打开的 Chrome 中完成登录并再次回复；不要进入定时任务步骤。
 
-### 4. 询问是否创建定时任务
+### 5. 询问是否创建定时任务
 
-登录验证成功后，只问：“是否创建 Moka 转写抓取定时任务？”
+Moka 登录和飞书 user 授权都验证成功后，只问：“是否创建 Moka 转写抓取定时任务？”
 
 - 用户选择否：简洁确认环境和登录已配置，结束。
 - 用户选择是：再单独询问执行时机。接受“每隔 N 小时”“每天 HH:mm”“工作日每天 HH:mm”等自然语言。
@@ -138,38 +181,67 @@ Cron：<根据用户执行时机生成>
 
 ## 定时采集入口
 
-该入口面向无人值守运行。不要重复安装环境；只检测 CDP 和登录态，然后采集。
+该入口面向无人值守运行。不要重复安装环境；检查 Moka CDP 登录态、lark-cli user 授权和目标 Base，然后按“单模式覆盖导出 → 立即写飞书”的事务顺序采集。
 
-### 1. 检查 CDP 和登录态
+### 1. 检查 Moka 和飞书状态
 
 执行：
 
 ```text
 opencli moka status -f json
+lark-cli auth status --json --verify
 ```
 
-- 若已认证，继续。
+- Moka 已认证且 lark-cli user 身份 `verified == true` 时继续。
 - 若 CDP 未连接，执行一次 `opencli moka login -f json` 尝试恢复专用 Chrome，再检查状态。
-- 若仍未连接或登录失效，停止本次采集并汇报“需要 HR 在 Moka 专用 Chrome 中重新登录”。定时任务中不要等待用户，也不要创建空结果冒充成功。
+- 若 Moka 仍未连接或登录失效，停止本次采集并汇报“需要 HR 在 Moka 专用 Chrome 中重新登录”。
+- 若 lark-cli 未配置、user 授权失效或 Base 无权访问，停止本次采集并汇报需要 HR 重新完成飞书授权。
+- 定时任务中不要等待用户，不要创建空结果或声称写入成功。
 
-### 2. 依次采集两种模式
+完整读取 `references/lark-base-write.md`，并确认其中 Base Token 和两张 Table ID 可访问。该参考文件是每次写飞书的强制执行规范，不得只凭记忆简化字段、去重或关联步骤。
 
-解析默认输出文件的绝对路径。严格按以下顺序运行：
+### 2. 校招：覆盖导出后立即写飞书
 
-1. `opencli moka mode campus -f json`
-2. `opencli moka export-transcripts --output "<绝对输出路径>" -f json`
-3. `opencli moka mode social -f json`
-4. `opencli moka export-transcripts --output "<绝对输出路径>" -f json`
+解析默认 JSON 的绝对路径，依次执行：
 
-`campus` 是校招，`social` 是社招。两个导出都写入同一文件；插件按 `applicationId + interviewId` 增量更新，不能另行覆盖或手工拼接 JSON。
+```text
+opencli moka mode campus -f json
+opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f json
+```
 
-导出输出可能包含很长的逐字稿。执行命令时抑制或限制终端回显，避免把完整 `records` 注入对话；以退出码和最终 JSON 文件为准。某一模式失败时记录错误，并在登录态仍有效的前提下继续尝试另一模式，保留已成功写入的数据。
+确认导出成功后，立即以该 JSON 为输入，严格执行 `references/lark-base-write.md` 的全部步骤：
 
-### 3. 汇总本次结果
+- 从飞书「面试转写」表分页读取全部已有记录。
+- 以 `applicationId + interviewId` 联合键区分新增和更新；重复项用新数据覆盖飞书旧记录。
+- 精确匹配或创建面试官。
+- 写入全部 16 个普通字段。
+- 单独 upsert `面试官（关联）`。
+- 所有 lark-cli 命令使用 `--as user --format json`。
+- 大 JSON 使用 CLI 工作目录下的相对临时文件或 stdin，不能把绝对路径传给 lark-cli 的 `@file`。
+- 只有 lark-cli 退出码 0/`ok == true` 且新增、更新、关联步骤都完成，才算校招落库成功。
 
-读取最终 JSON，但不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
+如果校招导出或写飞书失败，保留当前校招 JSON，停止本次流程，不要继续社招并覆盖该文件。记录失败阶段和错误。
 
-以北京时间当天为范围，从本次校招和社招采集涉及的记录中按 `applicationId + interviewId` 去重。每条记录只汇报：
+### 3. 社招：再次覆盖后立即写飞书
+
+仅在校招已成功写入飞书后执行：
+
+```text
+opencli moka mode social -f json
+opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrite -f json
+```
+
+此时 JSON 只包含本次社招结果，校招 JSON 被覆盖是预期行为，因为校招数据已经进入飞书。随后再次完整执行 `references/lark-base-write.md`，将社招 JSON 去重写入同一个飞书 Base。
+
+若社招写入失败，保留当前社招 JSON，报告失败，便于人工重试；不得声称全流程成功。
+
+每个模式完成飞书写入后，删除为 lark-cli 批量请求创建的临时 JSON，不删除默认导出文件。
+
+### 4. 汇总本次结果
+
+分别记录校招和社招导出结果、飞书新增/更新结果及涉及的面试记录。不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
+
+每条本次处理的记录只汇报：
 
 ```text
 候选人：<candidateName>｜面试官：<interviewerNames，以顿号连接；缺失时写“未记录”>｜岗位：<jobTitle>
@@ -177,18 +249,21 @@ opencli moka status -f json
 
 最后汇报：
 
-- 校招、社招分别成功或失败
+- 校招、社招分别是否导出成功、是否写入飞书成功
 - 本次去重后的记录数
+- 飞书新增面试官数、新增面试记录数、更新面试记录数、跳过数
 - 上述每条简要信息
-- JSON 的绝对保存路径
+- JSON 的绝对保存路径，并说明该文件只保留最后一次成功导出的单模式数据
+- 飞书 Base 链接
 - 若有错误，列出阶段和简短错误原因
 
-不要汇报逐字稿正文。没有今日记录时明确说“今日没有可导出的面试记录”，仍报告文件路径和两个模式的执行状态。
+不要汇报逐字稿正文。没有今日记录时明确说“今日没有可导出的面试记录”，仍报告两个模式状态、JSON 路径和 Base 链接。
 
 ## 安全与边界
 
 - 只访问当前登录账号有权查看的数据。
 - 不使用 mitmproxy 完成日常采集；不要求用户提供抓包或凭证。
 - 不把 JSON 数据文件写进插件仓库或 Skill 目录。
-- 不上传、发送或共享包含候选人信息和逐字稿的文件，除非用户另行明确授权。
-- 不因定时任务失败而重新安装工具、删除 Chrome Profile 或清空历史 JSON。
+- 只把候选人数据写入本 Skill 固定配置的飞书 Base；不上传或发送到其他位置。
+- 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
+- 默认 JSON 是单次中转文件，不再承担历史存储；历史去重与覆盖由飞书 Base 中的 `applicationId + interviewId` 联合键负责。

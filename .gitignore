@@ -5,3 +5,5 @@ moka-transcripts-*.json
 moka-transcripts.json
 download/
 skills/*.zip
+agents/
+.agents/
