@@ -1,0 +1,29 @@
+skills/moka-transcript-getter/references/lark-base-write.md
+  s_c60f8cd13cb001::t_32a4b4aa7609d9 1-349
+.gitignore
+  h_3279bd1d34f6be 8-9
+skills/moka-transcript-getter/SKILL.md
+  s_c60f8cd13cb001::t_a97ef42fd06086 184,186,192,195,197-221,223,225-232,234,236,238,240,242,244,252,254,256-257,260,267-269
+  s_c60f8cd13cb001::t_5804431005507a 3,8,20,29-30,38,48,58-59,88-95,102-103,108-135,145,155,157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "ba879a0d163f0dc540add06e407e5227b69388c1",
+  "prompts": {},
+  "humans": {
+    "h_3279bd1d34f6be": {
+      "author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  },
+  "sessions": {
+    "s_c60f8cd13cb001": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a033d2-187d-7ff3-81fc-4ea42f1b2c12",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
