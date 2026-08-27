@@ -132,6 +132,19 @@ applicationId + interviewId
 - `stats` 根据合并后的文件重新计算。
 - 已有文件格式不正确时停止写入，避免破坏原文件。
 
+## 只保存本次结果
+
+如果不需要历史记录，增加 `--overwrite`：
+
+```powershell
+opencli moka export-transcripts `
+  --output "$HOME\Desktop\moka-transcripts.json" `
+  --overwrite `
+  -f json
+```
+
+开启后不会读取或合并旧文件。每次执行都只保存本次获取的记录；目标路径存在同名 JSON 时直接覆盖。未增加 `--overwrite` 时，仍保持默认的增量去重更新。
+
 ## 更新插件
 
 ```text

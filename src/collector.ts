@@ -121,13 +121,16 @@ export function mergeCollections(
 export function writeCollection(
   outputPath: string,
   latest: CollectionResult,
+  options: { overwrite?: boolean } = {},
 ): { outputPath: string; result: CollectionResult } {
   const absolutePath = resolve(outputPath);
   const parentDirectory = dirname(absolutePath);
   // Windows drive roots (D:\) and POSIX root (/) already exist and should not
   // be passed to mkdirSync, which can raise EPERM on some Windows setups.
   if (!existsSync(parentDirectory)) mkdirSync(parentDirectory, { recursive: true });
-  const result = mergeCollections(readExistingCollection(absolutePath), latest);
+  const result = options.overwrite
+    ? latest
+    : mergeCollections(readExistingCollection(absolutePath), latest);
   writeFileSync(absolutePath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
   return { outputPath: absolutePath, result };
 }

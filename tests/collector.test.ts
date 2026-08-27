@@ -181,4 +181,53 @@ describe('mergeCollections', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('overwrites an existing JSON file with only the latest collection', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'moka-overwrite-'));
+    const outputPath = join(directory, 'moka-transcripts.json');
+    const oldRecord: TranscriptRecord = {
+      applicationId: 101,
+      interviewId: 9001,
+      candidateName: '旧候选人',
+      jobTitle: '旧岗位',
+      interviewerNames: [],
+      transcriptStatus: 'available',
+      transcript: '旧内容',
+    };
+    const newRecord: TranscriptRecord = {
+      applicationId: 202,
+      interviewId: 9002,
+      candidateName: '新候选人',
+      jobTitle: '新岗位',
+      interviewerNames: ['新面试官'],
+      transcriptStatus: 'available',
+      transcript: '新内容',
+    };
+    const base: CollectionResult = {
+      generatedAt: 'old',
+      source: 'source',
+      records: [oldRecord],
+      errors: [],
+      stats: { applications: 1, interviews: 1, transcriptsAvailable: 1, transcriptsUnavailable: 0, errors: 0 },
+    };
+    const latest: CollectionResult = {
+      generatedAt: 'new',
+      source: 'source',
+      records: [newRecord],
+      errors: [],
+      stats: { applications: 1, interviews: 1, transcriptsAvailable: 1, transcriptsUnavailable: 0, errors: 0 },
+    };
+
+    try {
+      writeCollection(outputPath, base);
+      const written = writeCollection(outputPath, latest, { overwrite: true });
+      const stored = JSON.parse(readFileSync(outputPath, 'utf8')) as CollectionResult;
+      expect(written.result).toEqual(latest);
+      expect(stored.generatedAt).toBe('new');
+      expect(stored.records).toEqual([newRecord]);
+      expect(stored.records).not.toContainEqual(oldRecord);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

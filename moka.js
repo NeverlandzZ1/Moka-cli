@@ -722,11 +722,11 @@ function mergeCollections(existing, latest) {
     }
   };
 }
-function writeCollection(outputPath, latest) {
+function writeCollection(outputPath, latest, options = {}) {
   const absolutePath = resolve(outputPath);
   const parentDirectory = dirname(absolutePath);
   if (!existsSync2(parentDirectory)) mkdirSync2(parentDirectory, { recursive: true });
-  const result = mergeCollections(readExistingCollection(absolutePath), latest);
+  const result = options.overwrite ? latest : mergeCollections(readExistingCollection(absolutePath), latest);
   writeFileSync(absolutePath, `${JSON.stringify(result, null, 2)}
 `, "utf8");
   return { outputPath: absolutePath, result };
@@ -924,13 +924,14 @@ cli({
     commonPortArg,
     { name: "candidate", valueRequired: true, help: "\u6309\u5019\u9009\u4EBA\u59D3\u540D\u7B5B\u9009" },
     { name: "output", valueRequired: true, help: "JSON \u6587\u4EF6\u8F93\u51FA\u8DEF\u5F84" },
+    { name: "overwrite", type: "boolean", default: false, help: "\u53EA\u4FDD\u5B58\u672C\u6B21\u7ED3\u679C\uFF0C\u76F4\u63A5\u8986\u76D6\u540C\u540D JSON \u6587\u4EF6" },
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
     async (page, bridge) => {
       const result = await collectTranscripts(page, bridge, collectionOptions(kwargs));
-      const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result) : void 0;
+      const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) }) : void 0;
       return written ? { ...written.result, outputPath: written.outputPath } : result;
     }
   )

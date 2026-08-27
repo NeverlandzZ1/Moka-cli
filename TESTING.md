@@ -273,7 +273,26 @@ $duplicates
 - macOS/Linux 路径能够正常解析。
 - 已有文件不是合法 JSON 时停止写入，不覆盖原文件。
 
-## 11. 请求体捕获故障排查
+## 11. 覆盖导出回归
+
+先确保 `$fullOutput` 中存在历史记录，再执行：
+
+```powershell
+opencli moka export-transcripts `
+  --output $fullOutput `
+  --overwrite `
+  -f json
+```
+
+通过标准：
+
+- 文件只包含这次命令获取的记录。
+- 旧文件中、本次未获取的 `applicationId + interviewId` 不再存在。
+- `generatedAt`、`errors` 和 `stats` 都来自本次结果。
+- 即使同名文件已存在也直接覆盖。
+- 不带 `--overwrite` 再运行时仍执行增量合并。
+
+## 12. 请求体捕获故障排查
 
 如果提示找不到“加载更多”或捕获超时：
 
@@ -291,7 +310,7 @@ opencli moka applications --request-json $body -f json -v
 
 不得复制、记录或提交请求头中的 Cookie、`moka-jwt`、`moka-token`、`csrfCk` 或 `connect.sid`。
 
-## 12. 最短回归流程
+## 13. 最短回归流程
 
 ```powershell
 npm run check
@@ -305,7 +324,7 @@ opencli moka transcript $applicationId $interviewId -f json -v
 
 最后用一位今天有面试的候选人执行一次 `export-transcripts`。
 
-## 13. 发布前检查
+## 14. 发布前检查
 
 ```powershell
 npm run check
@@ -337,7 +356,7 @@ opencli moka login -f json
 opencli plugin update moka-transcripts
 ```
 
-## 14. 安全要求
+## 15. 安全要求
 
 - 只使用测试账号有权查看的数据。
 - 不让脚本填写账号、密码或验证码。

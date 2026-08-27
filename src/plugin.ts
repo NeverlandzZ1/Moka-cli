@@ -216,6 +216,7 @@ cli({
     commonPortArg,
     { name: 'candidate', valueRequired: true, help: '按候选人姓名筛选' },
     { name: 'output', valueRequired: true, help: 'JSON 文件输出路径' },
+    { name: 'overwrite', type: 'boolean', default: false, help: '只保存本次结果，直接覆盖同名 JSON 文件' },
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
   func: async (kwargs) => withMokaPage(
@@ -223,7 +224,7 @@ cli({
     async (page, bridge) => {
       const result = await collectTranscripts(page, bridge, collectionOptions(kwargs));
       const written = typeof kwargs.output === 'string' && kwargs.output.trim()
-        ? writeCollection(kwargs.output.trim(), result)
+        ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) })
         : undefined;
       return written
         ? { ...written.result, outputPath: written.outputPath }
