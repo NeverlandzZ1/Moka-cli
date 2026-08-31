@@ -27,7 +27,9 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`Tripyoyo`
 - 飞书 Base：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
-- 飞书写入规范：`references/lark-base-write.md`
+- 飞书同步脚本：`scripts/sync-lark-base.mjs`
+- 脚本契约：`references/lark-base-write.md`
+- 同步状态：与 `transcript.json` 同目录的 `lark-sync-state.json` 和 `lark-sync.lock`
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
 
@@ -198,7 +200,7 @@ lark-cli auth status --json --verify
 - 若 lark-cli 未配置、user 授权失效或 Base 无权访问，停止本次采集并汇报需要 HR 重新完成飞书授权。
 - 定时任务中不要等待用户，不要创建空结果或声称写入成功。
 
-完整读取 `references/lark-base-write.md`，并确认其中 Base Token 和两张 Table ID 可访问。该参考文件是每次写飞书的强制执行规范，不得只凭记忆简化字段、去重或关联步骤。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`。飞书记录的去重、查询、创建、更新、关联、失败回查、断点和锁全部由该脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写这两张表。维护脚本时才读取 `references/lark-base-write.md`。
 
 ### 2. 校招：覆盖导出后立即写飞书
 
@@ -209,19 +211,13 @@ opencli moka mode campus -f json
 opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f json
 ```
 
-确认导出成功后，立即以该 JSON 为输入，严格执行 `references/lark-base-write.md` 的全部步骤：
+确认导出成功后，解析当前 Skill 目录和 JSON 绝对路径，执行：
 
-- 先把 `applicationId`、`interviewId` 规范化为整数，并按这两个 ID 对本次输入 JSON 自身去重；同键只保留最后一条。
-- 每条记录都用「申请ID AND 面试ID」两个 number 字段精确查询飞书，以 `applicationId + interviewId` 联合键区分新增和更新。
-- 真正创建前再次执行相同的双字段云端精确查询；查询到记录就改为更新，禁止继续创建。
-- 云端同一联合键已有多条时，只更新一条 canonical 记录，不新增、不自动删除，并在结果中列出该联合键和全部重复 `record_id`。
-- 精确匹配或创建面试官。
-- 用当前 `{"create_records":[...]}` 请求格式写入全部 16 个普通字段，同一 Base 的创建批次不得并发执行。
-- 单独 upsert `面试官（关联）`。
-- 不得把未提供 `--record-id` 的 `record-upsert` 当作业务联合键 upsert；更新必须使用精确查询返回的真实 `record_id`。
-- 所有 lark-cli 命令使用 `--as user --format json`。
-- 大 JSON 使用 CLI 工作目录下的相对临时文件或 stdin，不能把绝对路径传给 lark-cli 的 `@file`。
-- 只有 lark-cli 退出码 0/`ok == true` 且新增、更新、关联步骤都完成，才算校招落库成功。
+```text
+node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
+```
+
+如果 `lark-cli` 已安装但不在当前 PATH，先定位真实可执行文件，再增加 `--lark-cli "<可执行文件路径>"`；不要修改用户的全局 PATH。只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算校招落库成功。不得在脚本失败后绕过脚本手工重放任何飞书创建命令。
 
 如果校招导出或写飞书失败，保留当前校招 JSON，停止本次流程，不要继续社招并覆盖该文件。记录失败阶段和错误。
 
@@ -234,11 +230,11 @@ opencli moka mode social -f json
 opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrite -f json
 ```
 
-此时 JSON 只包含本次社招结果，校招 JSON 被覆盖是预期行为，因为校招数据已经进入飞书。随后再次完整执行 `references/lark-base-write.md`，将社招 JSON 去重写入同一个飞书 Base。
+此时 JSON 只包含本次社招结果，校招 JSON 被覆盖是预期行为，因为校招数据已经进入飞书。随后再次执行同一个 `sync-lark-base.mjs --input "<绝对输出路径>"`。脚本使用持久 checkpoint 和联合键回查，因此可安全接续校招运行。
 
 若社招写入失败，保留当前社招 JSON，报告失败，便于人工重试；不得声称全流程成功。
 
-每个模式完成飞书写入后，删除为 lark-cli 批量请求创建的临时 JSON，不删除默认导出文件。
+脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件、checkpoint 或锁文件；锁文件由脚本在正常退出时释放。
 
 ### 4. 汇总本次结果
 
@@ -261,7 +257,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrit
 
 - 校招、社招分别是否导出成功、是否写入飞书成功
 - 本次去重后的记录数
-- 飞书新增面试官数、新增面试记录数、更新面试记录数、跳过数
+- 飞书新增面试官数、新增面试记录数、从不明确创建结果中回查恢复数、更新面试记录数
 - 表内已有重复冲突数；若大于 0，列出每组 `applicationId + interviewId` 和全部重复 `record_id`，并说明未自动删除
 - 上述每条简要信息
 - JSON 的绝对保存路径，并说明该文件只保留最后一次成功导出的单模式数据
@@ -278,4 +274,5 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrit
 - 只把候选人数据写入本 Skill 固定配置的飞书 Base；不上传或发送到其他位置。
 - 对话汇报、自动化摘要、错误信息和调试日志中的候选人及面试官姓名必须脱敏；不得输出手机号、邮箱、身份证号或逐字稿正文。
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
-- 默认 JSON 是单次中转文件，不再承担历史存储；历史去重与覆盖由飞书 Base 中对 `applicationId + interviewId` 的双 number 字段精确查询、创建前复查和串行写入共同保证。
+- 不直接重试脚本内部失败的创建操作；重新运行整个脚本即可，脚本会先按联合键回查。
+- 默认 JSON 是单次中转文件，不再承担历史存储；历史去重与覆盖由同步脚本的输入去重、进程锁、checkpoint、双字段精确查询、创建失败回查和逐条串行写入共同保证。
