@@ -1,6 +1,6 @@
 ---
 name: moka-transcript-getter
-description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到“定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。”时；支持环境安装、Moka CDP 登录、飞书用户授权、可选创建定时任务，以及定时分别覆盖导出校招和社招 JSON 后去重写入飞书 Base。
+description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"时；支持环境安装、Moka CDP 登录、飞书用户授权、可选创建定时任务，以及定时分别覆盖导出校招和社招 JSON 后批量写入飞书 Base 并自动去重。
 ---
 
 # Moka Transcript Getter
@@ -11,8 +11,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 
 根据请求选择且只执行一个入口：
 
-1. 用户要求“配置环境并登录”或同义表达：执行“首次配置入口”。
-2. 请求内容为或明确表达“定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。”：执行“定时采集入口”。
+1. 用户要求"配置环境并登录"或同义表达：执行"首次配置入口"。
+2. 请求内容为或明确表达"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"：执行"定时采集入口"。
 
 ## 固定配置
 
@@ -28,8 +28,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 执行 Agent：`Tripyoyo`
 - 飞书 Base：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`
+- 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`
 - 脚本契约：`references/lark-base-write.md`
-- 同步状态：与 `transcript.json` 同目录的 `lark-sync-state.json` 和 `lark-sync.lock`
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
 
@@ -142,7 +142,7 @@ lark-cli auth status --json --verify
 opencli moka login -f json
 ```
 
-该命令应打开使用独立用户目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复“登录好了”。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
+该命令应打开使用独立用户目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复"登录好了"。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
 
 ### 4. 用户回复 Moka 登录完成后验证
 
@@ -156,10 +156,10 @@ opencli moka status -f json
 
 ### 5. 询问是否创建定时任务
 
-Moka 登录和飞书 user 授权都验证成功后，只问：“是否创建 Moka 转写抓取定时任务？”
+Moka 登录和飞书 user 授权都验证成功后，只问："是否创建 Moka 转写抓取定时任务？"
 
 - 用户选择否：简洁确认环境和登录已配置，结束。
-- 用户选择是：再单独询问执行时机。接受“每隔 N 小时”“每天 HH:mm”“工作日每天 HH:mm”等自然语言。
+- 用户选择是：再单独询问执行时机。接受"每隔 N 小时""每天 HH:mm""工作日每天 HH:mm"等自然语言。
 
 将时间转换为 Cron；至少支持：
 
@@ -183,7 +183,7 @@ Cron：<根据用户执行时机生成>
 
 ## 定时采集入口
 
-该入口面向无人值守运行。不要重复安装环境；检查 Moka CDP 登录态、lark-cli user 授权和目标 Base，然后按“单模式覆盖导出 → 立即写飞书”的事务顺序采集。
+该入口面向无人值守运行。不要重复安装环境；检查 Moka CDP 登录态、lark-cli user 授权，然后按"单模式覆盖导出 → 批量写入飞书 → 去重清理"的顺序采集。
 
 ### 1. 检查 Moka 和飞书状态
 
@@ -196,13 +196,12 @@ lark-cli auth status --json --verify
 
 - Moka 已认证且 lark-cli user 身份 `verified == true` 时继续。
 - 若 CDP 未连接，执行一次 `opencli moka login -f json` 尝试恢复专用 Chrome，再检查状态。
-- 若 Moka 仍未连接或登录失效，停止本次采集并汇报“需要 HR 在 Moka 专用 Chrome 中重新登录”。
+- 若 Moka 仍未连接或登录失效，停止本次采集并汇报"需要 HR 在 Moka 专用 Chrome 中重新登录"。
 - 若 lark-cli 未配置、user 授权失效或 Base 无权访问，停止本次采集并汇报需要 HR 重新完成飞书授权。
-- 定时任务中不要等待用户，不要创建空结果或声称写入成功。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`。飞书记录的去重、查询、创建、更新、关联、失败回查、断点和锁全部由该脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写这两张表。维护脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs` 和 `scripts/deduplicate-lark-base.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写这两张表。维护脚本时才读取 `references/lark-base-write.md`。
 
-### 2. 校招：覆盖导出后立即写飞书
+### 2. 校招：覆盖导出后批量写入飞书
 
 解析默认 JSON 的绝对路径，依次执行：
 
@@ -217,11 +216,11 @@ opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f j
 node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 ```
 
-如果 `lark-cli` 已安装但不在当前 PATH，先定位真实可执行文件，再增加 `--lark-cli "<可执行文件路径>"`；不要修改用户的全局 PATH。只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算校招落库成功。不得在脚本失败后绕过脚本手工重放任何飞书创建命令。
+如果 `lark-cli` 已安装但不在当前 PATH，先定位真实可执行文件，再增加 `--lark-cli "<可执行文件路径>"`；不要修改用户的全局 PATH。只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算校招落库成功。
 
-如果校招导出或写飞书失败，保留当前校招 JSON，停止本次流程，不要继续社招并覆盖该文件。记录失败阶段和错误。
+sync 脚本不查飞书是否已有记录，直接批量写入。如果写入到一半中断导致重复，由最后的去重步骤统一清理。
 
-### 3. 社招：再次覆盖后立即写飞书
+### 3. 社招：再次覆盖后批量写入飞书
 
 仅在校招已成功写入飞书后执行：
 
@@ -230,20 +229,36 @@ opencli moka mode social -f json
 opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrite -f json
 ```
 
-此时 JSON 只包含本次社招结果，校招 JSON 被覆盖是预期行为，因为校招数据已经进入飞书。随后再次执行同一个 `sync-lark-base.mjs --input "<绝对输出路径>"`。脚本使用持久 checkpoint 和联合键回查，因此可安全接续校招运行。
+此时 JSON 只包含本次社招结果，校招 JSON 被覆盖是预期行为，因为校招数据已经进入飞书。随后再次执行同一个 `sync-lark-base.mjs --input "<绝对输出路径>"`。
 
 若社招写入失败，保留当前社招 JSON，报告失败，便于人工重试；不得声称全流程成功。
 
-脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件、checkpoint 或锁文件；锁文件由脚本在正常退出时释放。
+### 4. 飞书去重清理（固定收尾步骤）
 
-### 4. 汇总本次结果
+社招写入完成后，无论是否有重复都执行去重清理：
 
-分别记录校招和社招导出结果、飞书新增/更新结果及涉及的面试记录。不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
+```text
+node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
+```
+
+去重规则：
+
+- 面试官信息表：按「姓名」去重，保留每组第一条，删除其余
+- 面试转写表：按「面试ID + 申请ID」联合键去重，保留每组第一条，删除其余
+- 删除后双向 link 关联自动清理
+
+只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算去重成功。去重失败不阻塞本次采集结果汇报，但在汇报中标注"去重未完成，需手动处理"。
+
+脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件。
+
+### 5. 汇总本次结果
+
+分别记录校招和社招导出结果、飞书写入结果及去重结果。不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
 
 每条本次处理的记录只汇报：
 
 ```text
-候选人：<脱敏后的 candidateName>｜面试官：<脱敏后的 interviewerNames，以顿号连接；缺失时写“未记录”>｜岗位：<jobTitle>
+候选人：<脱敏后的 candidateName>｜面试官：<脱敏后的 interviewerNames，以顿号连接；缺失时写"未记录">｜岗位：<jobTitle>
 ```
 
 姓名脱敏规则：
@@ -256,15 +271,15 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrit
 最后汇报：
 
 - 校招、社招分别是否导出成功、是否写入飞书成功
-- 本次去重后的记录数
-- 飞书新增面试官数、新增面试记录数、从不明确创建结果中回查恢复数、更新面试记录数
-- 表内已有重复冲突数；若大于 0，列出每组 `applicationId + interviewId` 和全部重复 `record_id`，并说明未自动删除
+- 本次输入去重后的记录数
+- 飞书新增面试官数、新增面试记录数、batch-create 是否降级
+- 去重结果：面试官表删除数、面试转写表删除数
 - 上述每条简要信息
-- JSON 的绝对保存路径，并说明该文件只保留最后一次成功导出的单模式数据
+- JSON 的绝对保存路径
 - 飞书 Base 链接
 - 若有错误，列出阶段和简短错误原因
 
-不要汇报逐字稿正文。没有今日记录时明确说“今日没有可导出的面试记录”，仍报告两个模式状态、JSON 路径和 Base 链接。
+不要汇报逐字稿正文。没有今日记录时明确说"今日没有可导出的面试记录"，仍报告两个模式状态、JSON 路径和 Base 链接。
 
 ## 安全与边界
 
@@ -274,5 +289,6 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrit
 - 只把候选人数据写入本 Skill 固定配置的飞书 Base；不上传或发送到其他位置。
 - 对话汇报、自动化摘要、错误信息和调试日志中的候选人及面试官姓名必须脱敏；不得输出手机号、邮箱、身份证号或逐字稿正文。
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
-- 不直接重试脚本内部失败的创建操作；重新运行整个脚本即可，脚本会先按联合键回查。
-- 默认 JSON 是单次中转文件，不再承担历史存储；历史去重与覆盖由同步脚本的输入去重、进程锁、checkpoint、双字段精确查询、创建失败回查和逐条串行写入共同保证。
+- 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。
+- sync 脚本不保证无重复——重复由 dedup 脚本统一清理。
+- 默认 JSON 是单次中转文件，不承担历史存储。
