@@ -25,8 +25,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 定时任务名称：`Moka转写抓取`
 - 定时任务指令：`定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。`
 - 时区：`Asia/Shanghai`
-- 执行 Agent：`Tripyoyo`
-- 飞书 Base：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
+- 执行 Agent：`TripYoYo`
+- 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 脚本契约：`references/lark-base-write.md`
@@ -134,7 +134,25 @@ lark-cli auth status --json --verify
 
 所有飞书操作使用 `--as user`。判断 lark-cli 成功必须使用退出码 0 或 JSON 的 `ok == true`，不能用旧式 `code == 0`。如返回缺失 scope，按错误中的 `missing_scopes` 发起最小增量授权；不得输出 access token。
 
-### 3. 打开 Moka 登录窗口并暂停
+### 3. 收集飞书 Base URL
+
+lark-cli 授权通过后，用选项框让用户选择飞书多维表格的来源：
+
+| 选项 | 说明 |
+|------|------|
+| 📂 使用已有配置（保存在 config.json 的） | 从 `~/.opencli/moka-config.json` 读取 `feishu_base_url`；不存在或为空时提示后续选其他选项 |
+| ✨ 让智能体新建 | 使用 `lark-cli base +app-table-create` 在已授权的飞书租户下创建新的多维表格，表名默认 `Moka面试转写记录`，创建后提取 Base URL 写入配置 |
+| 🔗 用户指定 URL | 用户手动粘贴飞书 Base URL（格式：`https://xxx.larkenterprise.com/base/xxx`），Agent 验证可访问后写入配置 |
+
+用户提供或新建后，写入 `~/.opencli/moka-config.json`：
+
+```json
+{ "feishu_base_url": "<用户提供或新建的URL>" }
+```
+
+后续所有飞书写入操作从该文件读取 `feishu_base_url`。配置已存在且用户选择"使用已有"时跳过写入。
+
+### 4. 打开 Moka 登录窗口并暂停
 
 执行：
 
@@ -144,7 +162,7 @@ opencli moka login -f json
 
 该命令应打开使用独立用户目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复"登录好了"。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
 
-### 4. 用户回复 Moka 登录完成后验证
+### 5. 用户回复 Moka 登录完成后验证
 
 执行：
 
@@ -154,7 +172,7 @@ opencli moka status -f json
 
 只有输出包含 `mokaLogin: authenticated` 才算成功。否则让用户继续在已打开的 Chrome 中完成登录并再次回复；不要进入定时任务步骤。
 
-### 5. 询问是否创建定时任务
+### 6. 询问是否创建定时任务
 
 Moka 登录和飞书 user 授权都验证成功后，只问："是否创建 Moka 转写抓取定时任务？"
 
@@ -176,7 +194,7 @@ Moka 登录和飞书 user 授权都验证成功后，只问："是否创建 Moka
 任务指令：定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。
 Cron：<根据用户执行时机生成>
 时区：Asia/Shanghai
-执行 Agent：Tripyoyo
+执行 Agent：TripYoYo
 ```
 
 只有工具明确返回创建成功后才能汇报成功；若当前宿主没有定时任务能力，明确说明无法创建，不要伪造结果。
