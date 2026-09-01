@@ -25,7 +25,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 定时任务名称：`Moka转写抓取`
 - 定时任务指令：`定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。`
 - 时区：`Asia/Shanghai`
-- 执行 Agent：`TripYoYo`
+- 执行 Agent：`当前助手自身`
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
@@ -194,7 +194,7 @@ Moka 登录和飞书 user 授权都验证成功后，只问："是否创建 Moka
 任务指令：定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。
 Cron：<根据用户执行时机生成>
 时区：Asia/Shanghai
-执行 Agent：TripYoYo
+执行 Agent：当前助手自身
 ```
 
 只有工具明确返回创建成功后才能汇报成功；若当前宿主没有定时任务能力，明确说明无法创建，不要伪造结果。
