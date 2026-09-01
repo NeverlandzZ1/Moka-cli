@@ -5,9 +5,10 @@
  *
  * 核心设计：
  * 1. 输入数据先在内存中去重（applicationId + interviewId 联合键）
- * 2. 不查飞书，直接批量写入（batch-create 面试官 → batch-create 面试转写）
+ * 2. 不查飞书，直接批量写入面试转写表（batch-create）
  * 3. 写入后由 deduplicate-lark-base.mjs 负责飞书端的去重清理
- * 4. 并发调用 lark-cli 子进程，而非串行
+ *
+ * 面试官信息表已废弃 — 面试官姓名仅作为 text 字段写入面试转写表的「面试官」列。
  *
  * 成功条件：退出码 0 且 stdout JSON 的 ok == true
  */
@@ -20,10 +21,8 @@ import { fileURLToPath } from "node:url";
 // ─── 固定配置 ───────────────────────────────────────────────
 const DEFAULTS = Object.freeze({
   baseToken: "TeB3bU3ltak2MWsD8I0cdoxPnSf",
-  interviewerTableId: "tblyYe2fDhI0Lluv",
   transcriptTableId: "tblUYL6KszcCEzuw",
   timeoutMs: 60_000,
-  concurrency: 5, // 并发 lark-cli 进程数
   batchSize: 200, // 每批次写入条数（飞书 API 上限 200）
 });
 
@@ -45,10 +44,8 @@ function parseArgs(argv) {
     else if (arg === "--input") out.input = argv[++i];
     else if (arg === "--lark-cli") out.larkCli = argv[++i];
     else if (arg === "--base-token") out.baseToken = argv[++i];
-    else if (arg === "--interviewer-table-id") out.interviewerTableId = argv[++i];
     else if (arg === "--transcript-table-id") out.transcriptTableId = argv[++i];
     else if (arg === "--timeout-ms") out.timeoutMs = Number(argv[++i]);
-    else if (arg === "--concurrency") out.concurrency = Number(argv[++i]);
     else if (arg === "--dry-run") out.dryRun = true;
     else throw new SyncError(`Unknown argument: ${arg}`);
   }
@@ -63,10 +60,8 @@ function usage() {
     "Options:",
     "  --lark-cli <path>           Path to lark-cli executable",
     "  --base-token <token>        Override default Base token",
-    "  --interviewer-table-id <id> Override interviewer table ID",
     "  --transcript-table-id <id>  Override transcript table ID",
     "  --timeout-ms <n>            Per-operation timeout (default 60000)",
-    "  --concurrency <n>           Parallel lark-cli processes (default 5)",
     "  --dry-run                   Print plan without writing to Lark",
   ].join("\n");
 }
@@ -139,7 +134,7 @@ function stringifyQuestionAnalysis(value) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function transcriptFields(record, interviewerRecordIds) {
+function transcriptFields(record) {
   return {
     "候选人姓名": asText(record.candidateName),
     "岗位名称": asText(record.jobTitle),
@@ -157,9 +152,6 @@ function transcriptFields(record, interviewerRecordIds) {
     "面试ID": record.interviewId,
     "轮次序号": asOptionalNumber(record.round),
     "转写类型": asOptionalNumber(record.transcriptType),
-    "面试官（关联）": interviewerRecordIds.length
-      ? interviewerRecordIds.map((id) => ({ id }))
-      : null,
   };
 }
 
@@ -231,93 +223,8 @@ function runLarkCli(command, args, timeoutMs) {
   });
 }
 
-// ─── 并发控制 ────────────────────────────────────────────────
-async function runConcurrent(tasks, concurrency) {
-  const results = new Array(tasks.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < tasks.length) {
-      const index = nextIndex++;
-      results[index] = await tasks[index]();
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, tasks.length) },
-    () => worker(),
-  );
-  await Promise.all(workers);
-  return results;
-}
-
-// ─── 批量写入面试官 ──────────────────────────────────────────
-async function batchCreateInterviewers(config, names, summary) {
-  const { larkCli, baseToken, interviewerTableId, timeoutMs, dryRun } = config;
-
-  // 去重面试官名字
-  const uniqueNames = [...new Set(names)];
-
-  if (dryRun) {
-    summary.createdInterviewers = uniqueNames.length;
-    return new Map(uniqueNames.map((name) => [name, `dry-run-${name}`]));
-  }
-
-  // 先拉取已有面试官，避免重复创建
-  const existingMap = new Map();
-  for (const name of uniqueNames) {
-    const args = [
-      larkCli, "base", "+record-list",
-      "--base-token", baseToken,
-      "--table-id", interviewerTableId,
-      "--filter-json", JSON.stringify({ logic: "and", conditions: [["姓名", "==", name]] }),
-      "--field-id", "姓名",
-      "--limit", "10",
-      "--as", "user",
-      "--format", "json",
-    ];
-    const result = await runLarkCli(larkCli, args.slice(1), timeoutMs);
-    const envelope = tryParseJson(result.stdout);
-    if (envelope?.ok && envelope?.data?.record_id_list?.length) {
-      existingMap.set(name, envelope.data.record_id_list[0]);
-    }
-  }
-
-  // 只创建不存在的面试官
-  const toCreate = uniqueNames.filter((n) => !existingMap.has(n));
-  const createdMap = new Map(existingMap);
-
-  if (toCreate.length > 0) {
-    // 逐个创建（record-upsert 不带 --record-id 就是创建），并发执行
-    const tasks = toCreate.map((name) => async () => {
-      const args = [
-        "base", "+record-upsert",
-        "--base-token", baseToken,
-        "--table-id", interviewerTableId,
-        "--json", JSON.stringify({ "姓名": name }),
-        "--as", "user",
-        "--format", "json",
-      ];
-      const result = await runLarkCli(larkCli, args, timeoutMs);
-      const envelope = tryParseJson(result.stdout);
-      if (envelope?.ok && envelope?.data?.record?.record_id) {
-        createdMap.set(name, envelope.data.record.record_id);
-        return { name, recordId: envelope.data.record.record_id, created: true };
-      }
-      return { name, recordId: null, created: false, error: result.stderr || result.stdout };
-    });
-
-    const results = await runConcurrent(tasks, config.concurrency);
-    for (const r of results) {
-      if (r.created) summary.createdInterviewers += 1;
-    }
-  }
-
-  return createdMap;
-}
-
 // ─── 批量创建面试转写 ────────────────────────────────────────
-async function batchCreateTranscripts(config, records, interviewerIdMap, summary) {
+async function batchCreateTranscripts(config, records, summary) {
   const { larkCli, baseToken, transcriptTableId, batchSize, timeoutMs, dryRun } = config;
 
   if (dryRun) {
@@ -327,10 +234,7 @@ async function batchCreateTranscripts(config, records, interviewerIdMap, summary
 
   // 为每条记录组装字段
   const prepared = records.map((record) => {
-    const interviewerRecordIds = record.interviewerNames
-      .map((name) => interviewerIdMap.get(name))
-      .filter(Boolean);
-    const fields = transcriptFields(record, interviewerRecordIds);
+    const fields = transcriptFields(record);
     return { record, fields };
   });
 
@@ -400,10 +304,8 @@ export async function sync(options) {
     ...DEFAULTS,
     larkCli: resolveLarkCli(options),
     baseToken: options.baseToken || DEFAULTS.baseToken,
-    interviewerTableId: options.interviewerTableId || DEFAULTS.interviewerTableId,
     transcriptTableId: options.transcriptTableId || DEFAULTS.transcriptTableId,
     timeoutMs: options.timeoutMs || DEFAULTS.timeoutMs,
-    concurrency: options.concurrency || DEFAULTS.concurrency,
     batchSize: DEFAULTS.batchSize,
     dryRun: options.dryRun || false,
   };
@@ -418,7 +320,6 @@ export async function sync(options) {
     deduplicatedRecords: deduped.records.length,
     inputDuplicatesDropped: deduped.dropped,
     created: 0,
-    createdInterviewers: 0,
     batchCreateFallback: false,
     records: [],
   };
@@ -427,16 +328,8 @@ export async function sync(options) {
     return summary;
   }
 
-  // 收集所有面试官名字
-  const allInterviewerNames = [...new Set(
-    deduped.records.flatMap((r) => r.interviewerNames)
-  )];
-
-  // 批量创建面试官，拿到 name → record_id 映射
-  const interviewerIdMap = await batchCreateInterviewers(config, allInterviewerNames, summary);
-
   // 批量创建面试转写
-  const transcriptResults = await batchCreateTranscripts(config, deduped.records, interviewerIdMap, summary);
+  const transcriptResults = await batchCreateTranscripts(config, deduped.records, summary);
 
   // 组装脱敏摘要
   summary.records = transcriptResults.map(({ record, recordId, operation }) => ({

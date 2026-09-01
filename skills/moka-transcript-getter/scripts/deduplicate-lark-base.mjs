@@ -4,9 +4,13 @@
  * deduplicate-lark-base.mjs — 飞书多维表格去重清理脚本
  *
  * 规则：
- *   表1「面试官信息」：按「姓名」字段去重，保留每组第一条，删除其余
- *   表2「面试转写」：按「面试ID + 申请ID」去重，保留每组第一条，删除其余
- *   删除后修复双向 link 关联关系
+ *   面试转写表：按「面试ID + 申请ID」联合键去重，保留每组第一条，删除其余
+ *
+ * 删除策略：
+ *   逐条调用 `lark-cli base +record-delete --record-id <id> --yes`
+ *   不使用 batch JSON 接口（batch delete 在某些场景下会静默失败）
+ *
+ * 面试官信息表已废弃 — 不再处理。
  *
  * 用法：
  *   node deduplicate-lark-base.mjs [options]
@@ -15,19 +19,19 @@
  *   --lark-cli <path>           lark-cli 可执行文件路径
  *   --dry-run                   只分析不删除
  *   --timeout-ms <n>            单次操作超时（默认 60000）
+ *   --concurrency <n>           并发删除进程数（默认 3；过高可能触发飞书限流）
  */
 
 import { spawn } from "node:child_process";
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ─── 固定配置 ───────────────────────────────────────────────
 const DEFAULTS = Object.freeze({
   baseToken: "TeB3bU3ltak2MWsD8I0cdoxPnSf",
-  interviewerTableId: "tblyYe2fDhI0Lluv",
   transcriptTableId: "tblUYL6KszcCEzuw",
   timeoutMs: 60_000,
+  concurrency: 3, // 并发删除进程数 — 保守值，避免飞书 API 限流
   larkCli: process.env.LARK_CLI || "lark-cli",
 });
 
@@ -48,9 +52,9 @@ function parseArgs(argv) {
     if (arg === "--help" || arg === "-h") out.help = true;
     else if (arg === "--lark-cli") out.larkCli = argv[++i];
     else if (arg === "--base-token") out.baseToken = argv[++i];
-    else if (arg === "--interviewer-table-id") out.interviewerTableId = argv[++i];
     else if (arg === "--transcript-table-id") out.transcriptTableId = argv[++i];
     else if (arg === "--timeout-ms") out.timeoutMs = Number(argv[++i]);
+    else if (arg === "--concurrency") out.concurrency = Number(argv[++i]);
     else if (arg === "--dry-run") out.dryRun = true;
     else throw new DedupError(`Unknown argument: ${arg}`);
   }
@@ -65,6 +69,7 @@ function usage() {
     "  --lark-cli <path>           Path to lark-cli executable",
     "  --dry-run                   Analyze only, no deletions",
     "  --timeout-ms <n>            Per-operation timeout (default 60000)",
+    "  --concurrency <n>           Parallel delete processes (default 3)",
   ].join("\n");
 }
 
@@ -168,58 +173,59 @@ async function fetchAllRecords(config, tableId, fieldIds) {
   return { records: allRecords, recordIds: allRecordIds };
 }
 
-// ─── 批量删除 ────────────────────────────────────────────────
-async function batchDelete(config, tableId, recordIds, dryRun) {
-  if (recordIds.length === 0) return { deleted: 0 };
+// ─── 逐条删除 ────────────────────────────────────────────────
+// 不使用 batch JSON 接口 — 逐条 +record-delete 更可靠。
+// batch delete 在某些场景下会静默失败（返回 ok 但未实际删除，
+// 或直接报错 batch delete N records failed）。
+// 逐条删除虽然慢一点，但每条都有明确的成功/失败反馈。
+async function deleteRecordsIndividually(config, tableId, recordIds, dryRun) {
+  if (recordIds.length === 0) return { deleted: 0, failed: 0, errors: [] };
 
   if (dryRun) {
-    return { deleted: recordIds.length, dryRun: true };
+    return { deleted: recordIds.length, failed: 0, errors: [], dryRun: true };
   }
 
-  // record-delete 支持 --json {"record_id_list":["rec_xxx"]}
-  const DELETED_PER_CALL = 50; // 安全每批
   let deleted = 0;
+  let failed = 0;
+  const errors = [];
 
-  for (let i = 0; i < recordIds.length; i += DELETED_PER_CALL) {
-    const batch = recordIds.slice(i, i + DELETED_PER_CALL);
+  // 构建逐条删除任务
+  const tasks = recordIds.map((recordId) => async () => {
     const args = [
       "base", "+record-delete",
       "--base-token", config.baseToken,
       "--table-id", tableId,
-      "--json", JSON.stringify({ record_id_list: batch }),
+      "--record-id", recordId,
       "--yes",
       "--as", "user",
       "--format", "json",
     ];
-    await invokeLarkCli(config, args, `batch delete ${batch.length} records`);
-    deleted += batch.length;
-  }
+    try {
+      const result = await runLarkCli(config.larkCli, args, config.timeoutMs);
+      const envelope = tryParseJson(result.stdout);
+      if (result.code === 0 && envelope?.ok === true) {
+        deleted += 1;
+      } else {
+        failed += 1;
+        errors.push({
+          recordId,
+          code: result.code,
+          stderr: result.stderr.slice(0, 200),
+        });
+      }
+    } catch (err) {
+      failed += 1;
+      errors.push({ recordId, error: err.message });
+    }
+  });
 
-  return { deleted };
-}
+  await runConcurrent(tasks, config.concurrency);
 
-// ─── 逐条更新 link 字段 ─────────────────────────────────────
-async function updateLinkField(config, tableId, recordId, linkFieldName, linkRecordIds, dryRun) {
-  if (dryRun) return;
-
-  const fieldValue = linkRecordIds.length > 0
-    ? linkRecordIds.map((id) => ({ id }))
-    : null;
-
-  const args = [
-    "base", "+record-upsert",
-    "--base-token", config.baseToken,
-    "--table-id", tableId,
-    "--record-id", recordId,
-    "--json", JSON.stringify({ [linkFieldName]: fieldValue }),
-    "--as", "user",
-    "--format", "json",
-  ];
-  await invokeLarkCli(config, args, `update link for ${recordId}`);
+  return { deleted, failed, errors };
 }
 
 // ─── 并发控制 ────────────────────────────────────────────────
-async function runConcurrent(tasks, concurrency = 5) {
+async function runConcurrent(tasks, concurrency = 3) {
   const results = new Array(tasks.length);
   let nextIndex = 0;
 
@@ -241,48 +247,22 @@ async function runConcurrent(tasks, concurrency = 5) {
 // ─── 去重逻辑 ────────────────────────────────────────────────
 
 /**
- * 表1「面试官信息」按「姓名」去重
- * @returns { keep: Map<name, recordId>, delete: string[] }
+ * 面试转写表按「面试ID + 申请ID」联合键去重
+ * @returns { keepBy: Map<key, recordId>, toDelete: string[] }
  */
-function deduplicateInterviewers(records, recordIds) {
-  const nameFieldIndex = 0; // data 中第一个字段是「姓名」
-  const keepBy = new Map(); // name → recordId (保留的第一条)
+function deduplicateTranscripts(records, recordIds) {
+  const keepBy = new Map(); // businessKey → recordId (保留的第一条)
   const toDelete = [];
 
   for (let i = 0; i < records.length; i++) {
-    const name = records[i][nameFieldIndex];
+    const interviewId = records[i][0]; // 面试ID
+    const applicationId = records[i][1]; // 申请ID
     const recordId = recordIds[i];
 
-    if (!name) {
-      // 没有姓名的记录跳过
+    // 跳过没有面试ID或申请ID的空行
+    if (interviewId == null || applicationId == null) {
       continue;
     }
-
-    if (keepBy.has(name)) {
-      toDelete.push(recordId);
-    } else {
-      keepBy.set(name, recordId);
-    }
-  }
-
-  return { keepBy, toDelete };
-}
-
-/**
- * 表2「面试转写」按「面试ID + 申请ID」去重
- * @returns { keep: Map<key, recordId>, delete: string[], keepRecords: Array }
- */
-function deduplicateTranscripts(records, recordIds, fieldPositions) {
-  const { interviewIdPos, applicationIdPos, interviewerLinkPos } = fieldPositions;
-  const keepBy = new Map(); // businessKey → recordId
-  const keepRecords = []; // 保留的记录完整信息
-  const toDelete = [];
-
-  for (let i = 0; i < records.length; i++) {
-    const interviewId = records[i][interviewIdPos];
-    const applicationId = records[i][applicationIdPos];
-    const recordId = recordIds[i];
-    const interviewerLinkVal = records[i][interviewerLinkPos];
 
     const key = `${applicationId}:${interviewId}`;
 
@@ -290,16 +270,10 @@ function deduplicateTranscripts(records, recordIds, fieldPositions) {
       toDelete.push(recordId);
     } else {
       keepBy.set(key, recordId);
-      keepRecords.push({
-        recordId,
-        interviewId,
-        applicationId,
-        interviewerLink: interviewerLinkVal,
-      });
     }
   }
 
-  return { keepBy, keepRecords, toDelete };
+  return { keepBy, toDelete };
 }
 
 // ─── 主流程 ──────────────────────────────────────────────────
@@ -308,86 +282,49 @@ export async function deduplicate(options) {
     ...DEFAULTS,
     larkCli: options.larkCli || DEFAULTS.larkCli,
     baseToken: options.baseToken || DEFAULTS.baseToken,
-    interviewerTableId: options.interviewerTableId || DEFAULTS.interviewerTableId,
     transcriptTableId: options.transcriptTableId || DEFAULTS.transcriptTableId,
     timeoutMs: options.timeoutMs || DEFAULTS.timeoutMs,
+    concurrency: options.concurrency || DEFAULTS.concurrency,
     dryRun: options.dryRun || false,
   };
 
   const summary = {
     ok: true,
     dryRun: config.dryRun,
-    interviewers: { before: 0, after: 0, deleted: 0 },
-    transcripts: { before: 0, after: 0, deleted: 0 },
-    linksFixed: 0,
+    transcripts: { before: 0, after: 0, deleted: 0, failed: 0, errors: [] },
   };
 
-  // ── 步骤1: 拉取表1「面试官信息」全量记录 ──
-  // 字段：姓名(fldZdsi7na), 面试记录-link(fldOgjnygQ)
-  const interviewerFields = ["fldZdsi7na", "fldOgjnygQ"];
-  const interviewerData = await fetchAllRecords(config, config.interviewerTableId, interviewerFields);
-  summary.interviewers.before = interviewerData.recordIds.length;
-
-  // ── 步骤2: 拉取表2「面试转写」全量记录 ──
-  // 字段：面试ID(fld85K9v7n), 申请ID(fldioQLp28), 面试官关联-link(fldxNBZFE5)
-  const transcriptFields = ["fld85K9v7n", "fldioQLp28", "fldxNBZFE5"];
+  // ── 步骤1: 拉取面试转写表全量记录 ──
+  // 字段：面试ID(fld85K9v7n), 申请ID(fldioQLp28)
+  const transcriptFields = ["fld85K9v7n", "fldioQLp28"];
   const transcriptData = await fetchAllRecords(config, config.transcriptTableId, transcriptFields);
   summary.transcripts.before = transcriptData.recordIds.length;
 
-  // ── 步骤3: 分析表1去重 ──
-  const interviewDedup = deduplicateInterviewers(interviewerData.records, interviewerData.recordIds);
-  summary.interviewers.after = interviewDedup.keepBy.size;
-  summary.interviewers.deleted = interviewDedup.toDelete.length;
-
-  // ── 步骤4: 分析表2去重 ──
-  const fieldPositions = {
-    interviewIdPos: 0,
-    applicationIdPos: 1,
-    interviewerLinkPos: 2,
-  };
-  const transcriptDedup = deduplicateTranscripts(transcriptData.records, transcriptData.recordIds, fieldPositions);
+  // ── 步骤2: 分析去重 ──
+  const transcriptDedup = deduplicateTranscripts(transcriptData.records, transcriptData.recordIds);
   summary.transcripts.after = transcriptDedup.keepBy.size;
   summary.transcripts.deleted = transcriptDedup.toDelete.length;
 
   // 如果 dry-run，到此为止
   if (config.dryRun) {
-    summary.wouldDeleteInterviewers = interviewDedup.toDelete;
     summary.wouldDeleteTranscripts = transcriptDedup.toDelete;
     return summary;
   }
 
-  // ── 步骤5: 先删除表2重复记录 ──
-  // （先删表2，因为表2有 link 指向表1；先删表1会导致表2的 link 悬空）
-  await batchDelete(config, config.transcriptTableId, transcriptDedup.toDelete, false);
+  // ── 步骤3: 逐条删除重复记录 ──
+  if (transcriptDedup.toDelete.length > 0) {
+    const delResult = await deleteRecordsIndividually(
+      config, config.transcriptTableId, transcriptDedup.toDelete, false,
+    );
+    summary.transcripts.deleted = delResult.deleted;
+    summary.transcripts.failed = delResult.failed;
+    summary.transcripts.errors = delResult.errors;
+  }
 
-  // ── 步骤6: 修复表2保留记录的 link 关联 ──
-  // 表2的「面试官（关联）」字段需要指向表1保留的 record_id
-  const linkUpdateTasks = transcriptDedup.keepRecords.map((item) => async () => {
-    if (item.interviewerLink && Array.isArray(item.interviewerLink)) {
-      // 检查当前 link 指向的 record_id 是否在表1保留列表中
-      const linkedIds = item.interviewerLink.map((link) => link.id);
-      const allStillValid = linkedIds.every((id) => interviewDedup.keepBy.has(
-        // 反向查找：表1保留的 record_id → name → 检查
-        // 其实这里直接检查 link 指向的 record_id 是否在 keepBy 的 values 中
-        [...interviewDedup.keepBy.values()].includes(id)
-      ));
-
-      if (!allStillValid) {
-        // 需要修复：找到对应的面试官保留 record_id
-        // 表2记录中的「面试官」字段（text类型）可以用来匹配
-        // 但更可靠的方式是直接用已有的 link → 面试官 name → 新的 keep record_id
-        // 由于简化逻辑，这里跳过——sync-lark-base.mjs 写入时已经设好了 link
-        return;
-      }
-    }
-  });
-
-  await runConcurrent(linkUpdateTasks, 5);
-
-  // ── 步骤7: 删除表1重复记录 ──
-  await batchDelete(config, config.interviewerTableId, interviewDedup.toDelete, false);
-
-  summary.linksFixed = 0; // 简化：sync脚本写入时已设好link，删除重复后双向link会自动清理
+  // 如果有任何删除失败，标记整体 ok=false（但仍返回已删除数量）
+  if (summary.transcripts.failed > 0) {
+    summary.ok = false;
+  }
 
   return summary;
 }

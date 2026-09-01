@@ -28,7 +28,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 执行 Agent：`Tripyoyo`
 - 飞书 Base：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`
-- 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`
+- 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete）
 - 脚本契约：`references/lark-base-write.md`
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
@@ -199,7 +199,7 @@ lark-cli auth status --json --verify
 - 若 Moka 仍未连接或登录失效，停止本次采集并汇报"需要 HR 在 Moka 专用 Chrome 中重新登录"。
 - 若 lark-cli 未配置、user 授权失效或 Base 无权访问，停止本次采集并汇报需要 HR 重新完成飞书授权。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs` 和 `scripts/deduplicate-lark-base.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写这两张表。维护脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs` 和 `scripts/deduplicate-lark-base.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写面试转写表。维护脚本时才读取 `references/lark-base-write.md`。
 
 ### 2. 校招：覆盖导出后批量写入飞书
 
@@ -243,11 +243,19 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 去重规则：
 
-- 面试官信息表：按「姓名」去重，保留每组第一条，删除其余
 - 面试转写表：按「面试ID + 申请ID」联合键去重，保留每组第一条，删除其余
-- 删除后双向 link 关联自动清理
+- 面试ID 或申请ID 为 null 的空行跳过，不参与去重
 
-只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算去重成功。去重失败不阻塞本次采集结果汇报，但在汇报中标注"去重未完成，需手动处理"。
+删除策略（关键设计）：
+
+- **逐条删除**：脚本逐条调用 `lark-cli base +record-delete --record-id <id> --yes`，不使用批量删除接口
+- **不用 batch delete 的原因**：飞书的 batch delete 命令在实测中会静默失败（报错 `batch delete N records failed`），即使同一用户在同一张表上 `batch-create` 完全成功。这不是权限问题，是批量删除接口本身的限制或不稳定
+- **并发控制**：默认 3 并发（可配 `--concurrency`），保守值防止飞书 API 限流
+- **独立反馈**：每条删除都有独立的成功/失败反馈，某条失败不影响其他条目
+
+只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算去重成功。输出中 `deleted` 记录成功删除数，`failed` 记录失败数，`errors` 含失败详情。
+
+去重失败不阻塞本次采集结果汇报，但在汇报中标注"去重未完成，需手动处理"并附上 `failed` 和 `errors` 信息。大多数失败是飞书 API 限流导致的暂时性问题，稍后重跑脚本即可恢复。
 
 脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件。
 
@@ -272,8 +280,8 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 - 校招、社招分别是否导出成功、是否写入飞书成功
 - 本次输入去重后的记录数
-- 飞书新增面试官数、新增面试记录数、batch-create 是否降级
-- 去重结果：面试官表删除数、面试转写表删除数
+- 新增面试记录数、batch-create 是否降级
+- 去重结果：面试转写表删除数/失败数
 - 上述每条简要信息
 - JSON 的绝对保存路径
 - 飞书 Base 链接
@@ -291,4 +299,6 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
 - 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。
 - sync 脚本不保证无重复——重复由 dedup 脚本统一清理。
+- dedup 脚本使用逐条删除（`+record-delete --record-id`），不使用 batch delete 接口——后者在实测中会静默失败。
+- 不写入或维护面试官信息表（已废弃）；面试官姓名仅作为 text 写入面试转写表。
 - 默认 JSON 是单次中转文件，不承担历史存储。

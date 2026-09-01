@@ -7,17 +7,17 @@
 | 项目 | 值 |
 |---|---|
 | Base Token | `TeB3bU3ltak2MWsD8I0cdoxPnSf` |
-| 面试官信息 Table ID | `tblyYe2fDhI0Lluv` |
 | 面试转写 Table ID | `tblUYL6KszcCEzuw` |
 | 业务联合键 | `applicationId + interviewId` |
-| 关联字段 | 面试转写表的 `面试官（关联）` |
+
+> 面试官信息表已废弃，不再写入或去重。面试官姓名仅作为 text 字段写入面试转写表的「面试官」列，不另建关联。
 
 ## 脚本概览
 
 | 脚本 | 职责 | 调用方式 |
 |---|---|---|
-| `sync-lark-base.mjs` | 输入去重 → 批量写入面试官+面试转写 | `node sync-lark-base.mjs --input <json>` |
-| `deduplicate-lark-base.mjs` | 飞书端去重清理：拉全表 → 找重复 → 删除 → 修复关联 | `node deduplicate-lark-base.mjs` |
+| `sync-lark-base.mjs` | 输入去重 → 批量写入面试转写 | `node sync-lark-base.mjs --input <json>` |
+| `deduplicate-lark-base.mjs` | 飞书端去重清理：拉全表 → 找重复 → 逐条删除 | `node deduplicate-lark-base.mjs` |
 
 ## sync-lark-base.mjs
 
@@ -39,10 +39,8 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 ### 设计原则
 
 1. **不查飞书**：输入数据在内存中去重（`applicationId + interviewId` 联合键），直接批量写入
-2. **先查面试官再创建**：先查已有面试官避免重复，不存在的才创建
-3. **批量创建**：使用 `record-batch-create` 批量写入面试转写，一批最多 200 条
-4. **并发**：面试官创建和查询并发执行（默认 5 并发）
-5. **降级**：batch-create 失败时自动降级为逐条创建
+2. **批量创建**：使用 `record-batch-create` 批量写入面试转写，一批最多 200 条
+3. **降级**：batch-create 失败时自动降级为逐条创建
 
 ### 输入
 
@@ -66,7 +64,6 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 | 面试ID | `interviewId` | JSON number |
 | 轮次序号 | `round` | JSON number 或 null |
 | 转写类型 | `transcriptType` | JSON number 或 null |
-| 面试官（关联） | 由面试官表查询得到 | `[{"id":"<record_id>"}]` 或 null |
 
 ### 输出
 
@@ -77,7 +74,6 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
   "deduplicatedRecords": 1,
   "inputDuplicatesDropped": 1,
   "created": 1,
-  "createdInterviewers": 1,
   "batchCreateFallback": false,
   "records": []
 }
@@ -98,12 +94,22 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 - `--dry-run`：只分析不删除
 - `--lark-cli <路径>`：指定 lark-cli 可执行文件
 - `--timeout-ms <n>`：单次操作超时（默认 60000）
+- `--concurrency <n>`：并发删除进程数（默认 3；过高可能触发飞书 API 限流）
+
+### 删除策略：逐条删除（关键设计决策）
+
+**不使用** `+record-delete --json '{"record_id_list":[...]}'` 批量删除接口。
+
+**原因**：批量删除接口在实测中会静默失败（报错 `batch delete N records failed`），即使写入操作使用相同凭证完全成功。这不是权限问题 — 同一用户在同一张表上 `batch-create` 成功但 `batch delete` 失败，说明是飞书批量删除接口本身的限制或不稳定。
+
+**实际做法**：逐条调用 `+record-delete --record-id <id> --yes`，每次只删一条。实测 4 条重复记录一次全部删除成功，无任何失败。
+
+**并发控制**：默认 3 并发（可配 `--concurrency`），保守值以避免飞书 API 限流。每条删除都有独立的成功/失败反馈，某条失败不影响其他条目。
 
 ### 去重规则
 
-1. **面试官信息表**：按「姓名」字段去重，保留每组第一条，删除其余
-2. **面试转写表**：按「面试ID + 申请ID」联合键去重，保留每组第一条，删除其余
-3. **关联修复**：删除重复记录后，双向 link 关系自动清理
+1. **面试转写表**：按「面试ID + 申请ID」联合键去重（两个值同时相同才算重复），保留每组第一条，删除其余
+2. **空行跳过**：面试ID 或申请ID 为 null 的记录不参与去重，不会被删除
 
 ### 输出
 
@@ -111,15 +117,30 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 {
   "ok": true,
   "dryRun": false,
-  "interviewers": { "before": 57, "after": 9, "deleted": 48 },
-  "transcripts": { "before": 102, "after": 16, "deleted": 86 },
-  "linksFixed": 0
+  "transcripts": {
+    "before": 102,
+    "after": 16,
+    "deleted": 86,
+    "failed": 0,
+    "errors": []
+  }
 }
 ```
+
+**失败处理**：如果有任何一条删除失败，`ok` 设为 `false`，但 `deleted` 仍记录成功删除的数量，`failed` 和 `errors` 记录失败详情。Agent 可据此决定是否重试。
+
+### 错误恢复
+
+如果 `ok == false`：
+- 检查 `errors` 数组中的 `recordId` 和错误信息
+- 大多数失败是暂时性的（飞书 API 限流），稍后重跑脚本即可
+- 也可以使用 `--dry-run` 先分析当前重复情况，再决定是否删除
 
 ## 明确不做
 
 - sync 脚本不查面试转写表是否已有记录（直接写入，去重交给 dedup 脚本）
 - sync 脚本不删除任何 Base 记录
 - dedup 脚本不创建新记录
+- dedup 脚本不使用 batch delete 接口（逐条删除更可靠）
+- 不写入或维护面试官信息表（已废弃）
 - Agent 不手工重放脚本内部失败的写入操作；重新运行整个脚本即可
