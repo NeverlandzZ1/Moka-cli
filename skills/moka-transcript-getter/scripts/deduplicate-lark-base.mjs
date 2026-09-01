@@ -23,8 +23,12 @@
  */
 
 import { spawn } from "node:child_process";
+import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Windows 命令行参数安全阈值（含 shell 包装开销）
+const MAX_INLINE_JSON = 3000;
 
 // ─── 固定配置 ───────────────────────────────────────────────
 const DEFAULTS = Object.freeze({
@@ -93,9 +97,24 @@ function tryParseJson(text) {
   }
 }
 
-function runLarkCli(command, args, timeoutMs) {
+/**
+ * 执行 lark-cli 命令。
+ * 当 jsonPayload 非空且较长时，将 JSON 写入 cwd 下临时文件，
+ * 用 lark-cli 的 --json @./filename 语法引用，绕过 Windows 命令行长度限制。
+ */
+function runLarkCli(command, args, timeoutMs, jsonPayload) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    let tempFile = null;
+    let finalArgs = args;
+
+    if (jsonPayload && jsonPayload.length > MAX_INLINE_JSON) {
+      const fileName = `lark-payload-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+      tempFile = path.join(process.cwd(), fileName);
+      fsSync.writeFileSync(tempFile, jsonPayload, "utf8");
+      finalArgs = args.map((a) => (a === jsonPayload ? `@./${fileName}` : a));
+    }
+
+    const child = spawn(command, finalArgs, {
       env: {
         ...process.env,
         LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
@@ -118,10 +137,12 @@ function runLarkCli(command, args, timeoutMs) {
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", () => {
       clearTimeout(timer);
+      if (tempFile) { try { fsSync.unlinkSync(tempFile); } catch {} }
       resolve({ code: 1, stdout, stderr, timedOut: false, error: true });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (tempFile) { try { fsSync.unlinkSync(tempFile); } catch {} }
       resolve({ code: code ?? 1, stdout, stderr, timedOut });
     });
   });

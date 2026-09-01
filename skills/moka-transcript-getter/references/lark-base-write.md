@@ -29,10 +29,9 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 
 可选参数：
 
-- `--lark-cli <路径>`：指定 lark-cli 可执行文件路径
+- `--lark-cli <路径>`：指定 lark-cli 可执行文件路径。定时任务中 lark-cli 可能不在默认 PATH，需通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位后传递
 - `--dry-run`：只分析不写入
 - `--timeout-ms <n>`：单次操作超时（默认 60000）
-- `--concurrency <n>`：并发进程数（默认 5）
 
 脚本使用 lark-cli user 身份。成功条件：退出码 0 且输出 JSON 的 `ok == true`。
 
@@ -41,6 +40,9 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 1. **不查飞书**：输入数据在内存中去重（`applicationId + interviewId` 联合键），直接批量写入
 2. **批量创建**：使用 `record-batch-create` 批量写入面试转写，一批最多 200 条
 3. **降级**：batch-create 失败时自动降级为逐条创建
+4. **Windows 命令行长度安全**：当 `--json` 参数超过 3000 字符时，自动将 JSON 写入当前工作目录下的临时文件，改用 lark-cli 的 `--json @./filename` 语法引用。lark-cli 要求 `@file` 路径必须是相对路径（相对于 cwd）。临时文件在命令执行后自动删除。
+
+> **为什么需要 @file 机制**：Windows CreateProcess 命令行上限约 32767 字符，但 shell 层（`shell: true`）有额外开销。面试转写包含逐字稿正文，16 条记录的 batch-create JSON 约 480KB，远超限制。直接传参会导致 `spawn ENAMETOOLONG` 错误。lark-cli 的 `@file.json` 语法支持从文件读取 JSON，但要求文件路径是相对路径（`@./file.json`），不接受绝对路径。
 
 ### 输入
 
@@ -92,7 +94,7 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 可选参数：
 
 - `--dry-run`：只分析不删除
-- `--lark-cli <路径>`：指定 lark-cli 可执行文件
+- `--lark-cli <路径>`：指定 lark-cli 可执行文件路径（同 sync 脚本）
 - `--timeout-ms <n>`：单次操作超时（默认 60000）
 - `--concurrency <n>`：并发删除进程数（默认 3；过高可能触发飞书 API 限流）
 

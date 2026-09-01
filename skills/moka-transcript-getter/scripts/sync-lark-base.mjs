@@ -8,6 +8,9 @@
  * 2. 不查飞书，直接批量写入面试转写表（batch-create）
  * 3. 写入后由 deduplicate-lark-base.mjs 负责飞书端的去重清理
  *
+ * Windows 兼容：当 --json 参数超过命令行长度限制时，自动切换为
+ * lark-cli 的 @file.json 语法（将 JSON 写入 cwd 下临时文件，用相对路径引用）。
+ *
  * 面试官信息表已废弃 — 面试官姓名仅作为 text 字段写入面试转写表的「面试官」列。
  *
  * 成功条件：退出码 0 且 stdout JSON 的 ok == true
@@ -15,6 +18,7 @@
 
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
+import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +29,10 @@ const DEFAULTS = Object.freeze({
   timeoutMs: 60_000,
   batchSize: 200, // 每批次写入条数（飞书 API 上限 200）
 });
+
+// Windows 命令行参数安全阈值（含 shell 包装开销）
+// Windows CreateProcess 上限约 32767 字符，shell 层有额外开销
+const MAX_INLINE_JSON = 3000;
 
 // ─── 错误类型 ────────────────────────────────────────────────
 class SyncError extends Error {
@@ -189,9 +197,34 @@ function tryParseJson(text) {
   }
 }
 
-function runLarkCli(command, args, timeoutMs) {
+/**
+ * 执行 lark-cli 命令。
+ *
+ * 当 jsonPayload 非空且较长时（超过 MAX_INLINE_JSON），将 JSON 写入当前工作目录下的
+ * 临时文件，并用 lark-cli 的 `--json @./filename` 语法引用，以绕过 Windows 命令行
+ * 长度限制（ENAMETOOLONG）。lark-cli 要求 @file 路径必须是相对路径。
+ *
+ * @param {string} command  - lark-cli 可执行文件路径
+ * @param {string[]} args   - 命令参数（可能包含占位 jsonPayload 值）
+ * @param {number} timeoutMs - 超时毫秒
+ * @param {string|null} jsonPayload - 需要通过 --json 传递的 JSON 字符串（可选）
+ * @returns {Promise<{code, stdout, stderr, timedOut, error}>}
+ */
+function runLarkCli(command, args, timeoutMs, jsonPayload) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    let tempFile = null;
+    let finalArgs = args;
+
+    // Windows（或任意平台）上 JSON payload 过大时，切换为 @file.json 语法
+    if (jsonPayload && jsonPayload.length > MAX_INLINE_JSON) {
+      const fileName = `lark-payload-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+      tempFile = path.join(process.cwd(), fileName);
+      fsSync.writeFileSync(tempFile, jsonPayload, "utf8");
+      // 将 args 中的 jsonPayload 值替换为 "@./filename"（lark-cli 要求相对路径）
+      finalArgs = args.map((a) => (a === jsonPayload ? `@./${fileName}` : a));
+    }
+
+    const child = spawn(command, finalArgs, {
       env: {
         ...process.env,
         LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
@@ -214,10 +247,12 @@ function runLarkCli(command, args, timeoutMs) {
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", () => {
       clearTimeout(timer);
+      if (tempFile) { try { fsSync.unlinkSync(tempFile); } catch {} }
       resolve({ code: 1, stdout, stderr, timedOut: false, error: true });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (tempFile) { try { fsSync.unlinkSync(tempFile); } catch {} }
       resolve({ code: code ?? 1, stdout, stderr, timedOut });
     });
   });
@@ -248,16 +283,16 @@ async function batchCreateTranscripts(config, records, summary) {
     const batch = prepared.slice(i, i + batchSize);
     const rows = batch.map((item) => fieldNames.map((fn) => item.fields[fn] ?? null));
 
-    const batchPayload = { fields: fieldNames, rows };
+    const batchPayloadJson = JSON.stringify({ fields: fieldNames, rows });
     const args = [
       "base", "+record-batch-create",
       "--base-token", baseToken,
       "--table-id", transcriptTableId,
-      "--json", JSON.stringify(batchPayload),
+      "--json", batchPayloadJson,
       "--format", "json",
     ];
 
-    const result = await runLarkCli(larkCli, args, timeoutMs);
+    const result = await runLarkCli(larkCli, args, timeoutMs, batchPayloadJson);
     const envelope = tryParseJson(result.stdout);
 
     // batch-create 返回的 record_id_list 按顺序对应 rows
@@ -276,14 +311,15 @@ async function batchCreateTranscripts(config, records, summary) {
       // batch-create 失败，降级为逐条创建
       summary.batchCreateFallback = true;
       for (const item of batch) {
+        const singlePayloadJson = JSON.stringify(item.fields);
         const singleArgs = [
           "base", "+record-upsert",
           "--base-token", baseToken,
           "--table-id", transcriptTableId,
-          "--json", JSON.stringify(item.fields),
+          "--json", singlePayloadJson,
           "--format", "json",
         ];
-        const singleResult = await runLarkCli(larkCli, singleArgs, timeoutMs);
+        const singleResult = await runLarkCli(larkCli, singleArgs, timeoutMs, singlePayloadJson);
         const singleEnvelope = tryParseJson(singleResult.stdout);
         const recordId = singleEnvelope?.data?.record?.record_id || null;
         results.push({ record: item.record, recordId, operation: recordId ? "created" : "failed" });

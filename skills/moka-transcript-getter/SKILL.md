@@ -27,8 +27,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`Tripyoyo`
 - 飞书 Base：https://trip.larkenterprise.com/base/TeB3bU3ltak2MWsD8I0cdoxPnSf
-- 飞书同步脚本：`scripts/sync-lark-base.mjs`
-- 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete）
+- 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
+- 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 脚本契约：`references/lark-base-write.md`
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
@@ -198,6 +198,8 @@ lark-cli auth status --json --verify
 - 若 CDP 未连接，执行一次 `opencli moka login -f json` 尝试恢复专用 Chrome，再检查状态。
 - 若 Moka 仍未连接或登录失效，停止本次采集并汇报"需要 HR 在 Moka 专用 Chrome 中重新登录"。
 - 若 lark-cli 未配置、user 授权失效或 Base 无权访问，停止本次采集并汇报需要 HR 重新完成飞书授权。
+
+**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync 和 dedup 脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
 确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs` 和 `scripts/deduplicate-lark-base.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写面试转写表。维护脚本时才读取 `references/lark-base-write.md`。
 
