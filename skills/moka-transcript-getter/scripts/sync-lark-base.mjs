@@ -19,13 +19,16 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import fsSync from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ─── 固定配置 ───────────────────────────────────────────────
+// ─── 默认配置 ───────────────────────────────────────────────
+// 目标 Base 不再硬编码,由用户在首次配置时写入 ~/.opencli/moka-config.json 的
+// feishu_base_url 字段,脚本从中解析出 app_token 与 table_id。
+const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".opencli", "moka-config.json");
+
 const DEFAULTS = Object.freeze({
-  baseToken: "TeB3bU3ltak2MWsD8I0cdoxPnSf",
-  transcriptTableId: "tblUYL6KszcCEzuw",
   timeoutMs: 60_000,
   batchSize: 200, // 每批次写入条数（飞书 API 上限 200）
 });
@@ -51,6 +54,8 @@ function parseArgs(argv) {
     if (arg === "--help" || arg === "-h") out.help = true;
     else if (arg === "--input") out.input = argv[++i];
     else if (arg === "--lark-cli") out.larkCli = argv[++i];
+    else if (arg === "--config") out.configPath = argv[++i];
+    else if (arg === "--feishu-base-url") out.feishuBaseUrl = argv[++i];
     else if (arg === "--base-token") out.baseToken = argv[++i];
     else if (arg === "--transcript-table-id") out.transcriptTableId = argv[++i];
     else if (arg === "--timeout-ms") out.timeoutMs = Number(argv[++i]);
@@ -67,11 +72,64 @@ function usage() {
     "",
     "Options:",
     "  --lark-cli <path>           Path to lark-cli executable",
-    "  --base-token <token>        Override default Base token",
-    "  --transcript-table-id <id>  Override transcript table ID",
+    "  --config <path>             Config JSON (default ~/.opencli/moka-config.json)",
+    "  --feishu-base-url <url>     Override feishu_base_url from config",
+    "  --base-token <token>        Override Base app_token parsed from URL",
+    "  --transcript-table-id <id>  Override transcript table ID parsed from URL",
     "  --timeout-ms <n>            Per-operation timeout (default 60000)",
     "  --dry-run                   Print plan without writing to Lark",
   ].join("\n");
+}
+
+// ─── 目标 Base 解析 ─────────────────────────────────────────
+// 从飞书 Base URL 中解析 app_token 与 table_id。
+// 支持形式:
+//   https://xxx.feishu.cn/base/<app_token>?table=<table_id>&view=...
+//   https://xxx.larkenterprise.com/base/<app_token>?table=<table_id>
+function parseFeishuBaseUrl(url) {
+  if (!url || typeof url !== "string") {
+    throw new SyncError("feishu_base_url is empty; run the first-time setup to configure it");
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new SyncError(`feishu_base_url is not a valid URL: ${url}`);
+  }
+  const match = parsed.pathname.match(/\/base\/([A-Za-z0-9]+)/);
+  if (!match) {
+    throw new SyncError(`feishu_base_url must contain /base/<app_token>: ${url}`);
+  }
+  const appToken = match[1];
+  const tableId = parsed.searchParams.get("table");
+  if (!tableId) {
+    throw new SyncError(`feishu_base_url must include ?table=<table_id>: ${url}`);
+  }
+  return { appToken, tableId };
+}
+
+function readConfigSync(configPath) {
+  try {
+    const raw = fsSync.readFileSync(configPath, "utf8");
+    return JSON.parse(raw);
+  } catch (err) {
+    if (err.code === "ENOENT") return {};
+    throw new SyncError(`Failed to read config ${configPath}: ${err.message}`);
+  }
+}
+
+function resolveTarget(options) {
+  // 优先级: 命令行显式 override > config 文件 feishu_base_url
+  if (options.baseToken && options.transcriptTableId) {
+    return { appToken: options.baseToken, tableId: options.transcriptTableId };
+  }
+  const url = options.feishuBaseUrl
+    || readConfigSync(options.configPath || DEFAULT_CONFIG_PATH).feishu_base_url;
+  const parsed = parseFeishuBaseUrl(url);
+  return {
+    appToken: options.baseToken || parsed.appToken,
+    tableId: options.transcriptTableId || parsed.tableId,
+  };
 }
 
 // ─── 输入去重 ────────────────────────────────────────────────
@@ -336,11 +394,12 @@ export async function sync(options) {
   if (!options.input) throw new SyncError("--input is required");
 
   const inputPath = path.resolve(options.input);
+  const target = resolveTarget(options);
   const config = {
     ...DEFAULTS,
     larkCli: resolveLarkCli(options),
-    baseToken: options.baseToken || DEFAULTS.baseToken,
-    transcriptTableId: options.transcriptTableId || DEFAULTS.transcriptTableId,
+    baseToken: target.appToken,
+    transcriptTableId: target.tableId,
     timeoutMs: options.timeoutMs || DEFAULTS.timeoutMs,
     batchSize: DEFAULTS.batchSize,
     dryRun: options.dryRun || false,

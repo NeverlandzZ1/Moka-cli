@@ -2,15 +2,32 @@
 
 本文件用于维护 `../scripts/sync-lark-base.mjs` 和 `../scripts/deduplicate-lark-base.mjs`。Agent 应调用脚本，不手工拼接写入命令。
 
-## 固定目标
+## 目标 Base
+
+目标飞书多维表格**不再硬编码**，由用户在首次配置时写入：
+
+```json
+// ~/.opencli/moka-config.json
+{ "feishu_base_url": "https://xxx.feishu.cn/base/<app_token>?table=<table_id>" }
+```
+
+两个脚本启动时都会读取该配置：
+
+1. 优先级：`--base-token`/`--transcript-table-id` 显式参数 > `--feishu-base-url` 参数 > `--config` 指定文件 > 默认 `~/.opencli/moka-config.json`。
+2. 从 `feishu_base_url` 中解析：路径段 `/base/<app_token>` 得到 Base app_token，query 参数 `?table=<table_id>` 得到面试转写表 table_id。
+3. URL 必须同时包含 `/base/<app_token>` 与 `?table=<table_id>`，否则脚本报错 `feishu_base_url must include ?table=<table_id>`。
+
+因此首次配置时若走"用户指定 URL"路径，务必让用户复制**已选中面试转写表的完整 URL**，不能只给 Base 首页 URL。若走"智能体新建"路径，创建 Base 后需追加打开面试转写表并取当前 URL。
 
 | 项目 | 值 |
 |---|---|
-| Base Token | `TeB3bU3ltak2MWsD8I0cdoxPnSf` |
-| 面试转写 Table ID | `tblUYL6KszcCEzuw` |
+| Base app_token | 从 `feishu_base_url` 路径 `/base/<app_token>` 解析 |
+| 面试转写 Table ID | 从 `feishu_base_url` query `?table=<id>` 解析 |
 | 业务联合键 | `applicationId + interviewId` |
+| 去重键字段（按显示名解析） | 面试转写表必须包含名为「面试ID」「申请ID」的字段；dedup 脚本启动时按字段名调 `+field-list` 拿到当前表的真实 `field_id` 再拉数据，不再硬编码 `field_id` |
 
 > 面试官信息表已废弃，不再写入或去重。面试官姓名仅作为 text 字段写入面试转写表的「面试官」列，不另建关联。
+> 字段显示名固定为「面试ID」「申请ID」，两个名字变了就要同步改 dedup 脚本顶部的 `INTERVIEW_ID_FIELD_NAME` / `APPLICATION_ID_FIELD_NAME` 常量。字段内部 `field_id` 允许每张 Base 各不相同——首次配置走"智能体新建"路径新建的 Base，只要含这两个字段名就能直接跑。
 
 ## 脚本概览
 
@@ -30,6 +47,9 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 可选参数：
 
 - `--lark-cli <路径>`：指定 lark-cli 可执行文件路径。定时任务中 lark-cli 可能不在默认 PATH，需通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位后传递
+- `--config <路径>`：指定配置文件路径（默认 `~/.opencli/moka-config.json`）
+- `--feishu-base-url <url>`：不读 config，直接指定目标 Base URL
+- `--base-token <token>` / `--transcript-table-id <id>`：分别覆盖解析结果；两个同时传时完全跳过 URL 解析
 - `--dry-run`：只分析不写入
 - `--timeout-ms <n>`：单次操作超时（默认 60000）
 
@@ -95,6 +115,9 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 - `--dry-run`：只分析不删除
 - `--lark-cli <路径>`：指定 lark-cli 可执行文件路径（同 sync 脚本）
+- `--config <路径>`：指定配置文件路径（默认 `~/.opencli/moka-config.json`）
+- `--feishu-base-url <url>`：不读 config，直接指定目标 Base URL
+- `--base-token <token>` / `--transcript-table-id <id>`：分别覆盖解析结果
 - `--timeout-ms <n>`：单次操作超时（默认 60000）
 - `--concurrency <n>`：并发删除进程数（默认 3；过高可能触发飞书 API 限流）
 

@@ -141,8 +141,8 @@ lark-cli 授权通过后，用选项框让用户选择飞书多维表格的来�
 | 选项 | 说明 |
 |------|------|
 | 📂 使用已有配置（保存在 config.json 的） | 从 `~/.opencli/moka-config.json` 读取 `feishu_base_url`；不存在或为空时提示后续选其他选项 |
-| ✨ 让智能体新建 | 使用 `lark-cli base +app-table-create` 在已授权的飞书租户下创建新的多维表格，表名默认 `Moka面试转写记录`，创建后提取 Base URL 写入配置 |
-| 🔗 用户指定 URL | 用户手动粘贴飞书 Base URL（格式：`https://xxx.larkenterprise.com/base/xxx`），Agent 验证可访问后写入配置 |
+| ✨ 让智能体新建 | 使用 `lark-cli base +app-table-create` 在已授权的飞书租户下创建新的多维表格，表名默认 `Moka面试转写记录`，创建后打开面试转写表并把带 `?table=<id>` 的完整 URL 写入配置 |
+| 🔗 用户指定 URL | 用户手动粘贴飞书 Base URL（格式：`https://xxx.feishu.cn/base/<app_token>?table=<table_id>`，必须包含 `?table=<id>` 参数——即在多维表格中选中目标面试转写表后再复制 URL），Agent 验证可访问后写入配置 |
 
 用户提供或新建后，写入 `~/.opencli/moka-config.json`：
 

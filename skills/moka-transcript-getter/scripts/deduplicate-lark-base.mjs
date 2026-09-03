@@ -24,20 +24,28 @@
 
 import { spawn } from "node:child_process";
 import fsSync from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Windows 命令行参数安全阈值（含 shell 包装开销）
 const MAX_INLINE_JSON = 3000;
 
-// ─── 固定配置 ───────────────────────────────────────────────
+// ─── 默认配置 ───────────────────────────────────────────────
+// 目标 Base 由用户在首次配置时写入 ~/.opencli/moka-config.json 的 feishu_base_url,
+// 脚本从中解析出 app_token 与 table_id。
+const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".opencli", "moka-config.json");
+
 const DEFAULTS = Object.freeze({
-  baseToken: "TeB3bU3ltak2MWsD8I0cdoxPnSf",
-  transcriptTableId: "tblUYL6KszcCEzuw",
   timeoutMs: 60_000,
   concurrency: 3, // 并发删除进程数 — 保守值，避免飞书 API 限流
   larkCli: process.env.LARK_CLI || "lark-cli",
 });
+
+// 去重键所在字段的显示名。字段的内部 field_id 每张表都不同，因此启动时按名字
+// 到当前表的字段列表里查真实 field_id（见 resolveFieldIds），不再硬编码。
+const INTERVIEW_ID_FIELD_NAME = "面试ID";
+const APPLICATION_ID_FIELD_NAME = "申请ID";
 
 // ─── 错误类型 ────────────────────────────────────────────────
 class DedupError extends Error {
@@ -55,6 +63,8 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") out.help = true;
     else if (arg === "--lark-cli") out.larkCli = argv[++i];
+    else if (arg === "--config") out.configPath = argv[++i];
+    else if (arg === "--feishu-base-url") out.feishuBaseUrl = argv[++i];
     else if (arg === "--base-token") out.baseToken = argv[++i];
     else if (arg === "--transcript-table-id") out.transcriptTableId = argv[++i];
     else if (arg === "--timeout-ms") out.timeoutMs = Number(argv[++i]);
@@ -71,10 +81,60 @@ function usage() {
     "",
     "Options:",
     "  --lark-cli <path>           Path to lark-cli executable",
+    "  --config <path>             Config JSON (default ~/.opencli/moka-config.json)",
+    "  --feishu-base-url <url>     Override feishu_base_url from config",
+    "  --base-token <token>        Override Base app_token parsed from URL",
+    "  --transcript-table-id <id>  Override transcript table ID parsed from URL",
     "  --dry-run                   Analyze only, no deletions",
     "  --timeout-ms <n>            Per-operation timeout (default 60000)",
     "  --concurrency <n>           Parallel delete processes (default 3)",
   ].join("\n");
+}
+
+// ─── 目标 Base 解析 ─────────────────────────────────────────
+function parseFeishuBaseUrl(url) {
+  if (!url || typeof url !== "string") {
+    throw new DedupError("feishu_base_url is empty; run the first-time setup to configure it");
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new DedupError(`feishu_base_url is not a valid URL: ${url}`);
+  }
+  const match = parsed.pathname.match(/\/base\/([A-Za-z0-9]+)/);
+  if (!match) {
+    throw new DedupError(`feishu_base_url must contain /base/<app_token>: ${url}`);
+  }
+  const appToken = match[1];
+  const tableId = parsed.searchParams.get("table");
+  if (!tableId) {
+    throw new DedupError(`feishu_base_url must include ?table=<table_id>: ${url}`);
+  }
+  return { appToken, tableId };
+}
+
+function readConfigSync(configPath) {
+  try {
+    const raw = fsSync.readFileSync(configPath, "utf8");
+    return JSON.parse(raw);
+  } catch (err) {
+    if (err.code === "ENOENT") return {};
+    throw new DedupError(`Failed to read config ${configPath}: ${err.message}`);
+  }
+}
+
+function resolveTarget(options) {
+  if (options.baseToken && options.transcriptTableId) {
+    return { appToken: options.baseToken, tableId: options.transcriptTableId };
+  }
+  const url = options.feishuBaseUrl
+    || readConfigSync(options.configPath || DEFAULT_CONFIG_PATH).feishu_base_url;
+  const parsed = parseFeishuBaseUrl(url);
+  return {
+    appToken: options.baseToken || parsed.appToken,
+    tableId: options.transcriptTableId || parsed.tableId,
+  };
 }
 
 // ─── 工具函数 ────────────────────────────────────────────────
@@ -155,6 +215,58 @@ async function invokeLarkCli(config, args, label) {
     throw new DedupError(`${label} failed`, { code: result.code, stderr: result.stderr.slice(0, 500), timedOut: result.timedOut });
   }
   return envelope;
+}
+
+// ─── 字段名 → field_id 解析 ──────────────────────────────────
+// 按字段显示名到当前表的字段清单里挑出真实 field_id。允许用户新建/更换 Base,
+// 只要面试转写表里存在名为 INTERVIEW_ID_FIELD_NAME / APPLICATION_ID_FIELD_NAME
+// 的字段即可（内容可以完全不同，字段的 field_id 也不再要求与旧表一致）。
+async function resolveFieldIds(config, tableId, fieldNames) {
+  const allFields = [];
+  let pageToken = null;
+  // 部分 lark-cli 版本的 +field-list 用 page-token 分页；无分页时单页返回即可。
+  do {
+    const args = [
+      "base", "+field-list",
+      "--base-token", config.baseToken,
+      "--table-id", tableId,
+      "--limit", "200",
+      "--as", "user",
+      "--format", "json",
+    ];
+    if (pageToken) args.push("--page-token", pageToken);
+    const envelope = await invokeLarkCli(config, args, "list fields");
+    const data = envelope.data || {};
+    const items = Array.isArray(data.items) ? data.items
+      : Array.isArray(data.data) ? data.data
+      : Array.isArray(data.fields) ? data.fields
+      : [];
+    allFields.push(...items);
+    pageToken = data.has_more && data.page_token ? data.page_token : null;
+  } while (pageToken);
+
+  const byName = new Map();
+  for (const f of allFields) {
+    const name = f?.field_name ?? f?.name;
+    const id = f?.field_id ?? f?.id;
+    if (name && id) byName.set(String(name), String(id));
+  }
+
+  const resolved = {};
+  const missing = [];
+  for (const name of fieldNames) {
+    const id = byName.get(name);
+    if (id) resolved[name] = id;
+    else missing.push(name);
+  }
+  if (missing.length > 0) {
+    throw new DedupError(
+      `Field(s) not found on table ${tableId}: ${missing.join(", ")}. `
+      + `The transcript table must contain fields named exactly: ${fieldNames.join(", ")}.`,
+      { availableFields: [...byName.keys()], missing },
+    );
+  }
+  return resolved;
 }
 
 // ─── 拉取全表记录 ────────────────────────────────────────────
@@ -299,11 +411,12 @@ function deduplicateTranscripts(records, recordIds) {
 
 // ─── 主流程 ──────────────────────────────────────────────────
 export async function deduplicate(options) {
+  const target = resolveTarget(options);
   const config = {
     ...DEFAULTS,
     larkCli: options.larkCli || DEFAULTS.larkCli,
-    baseToken: options.baseToken || DEFAULTS.baseToken,
-    transcriptTableId: options.transcriptTableId || DEFAULTS.transcriptTableId,
+    baseToken: target.appToken,
+    transcriptTableId: target.tableId,
     timeoutMs: options.timeoutMs || DEFAULTS.timeoutMs,
     concurrency: options.concurrency || DEFAULTS.concurrency,
     dryRun: options.dryRun || false,
@@ -315,9 +428,17 @@ export async function deduplicate(options) {
     transcripts: { before: 0, after: 0, deleted: 0, failed: 0, errors: [] },
   };
 
-  // ── 步骤1: 拉取面试转写表全量记录 ──
-  // 字段：面试ID(fld85K9v7n), 申请ID(fldioQLp28)
-  const transcriptFields = ["fld85K9v7n", "fldioQLp28"];
+  // ── 步骤1: 按字段名解析出当前表真实的 field_id，再拉全量记录 ──
+  const fieldIds = await resolveFieldIds(
+    config,
+    config.transcriptTableId,
+    [INTERVIEW_ID_FIELD_NAME, APPLICATION_ID_FIELD_NAME],
+  );
+  // 顺序固定：records[i][0]=面试ID, records[i][1]=申请ID（deduplicateTranscripts 依赖此顺序）
+  const transcriptFields = [
+    fieldIds[INTERVIEW_ID_FIELD_NAME],
+    fieldIds[APPLICATION_ID_FIELD_NAME],
+  ];
   const transcriptData = await fetchAllRecords(config, config.transcriptTableId, transcriptFields);
   summary.transcripts.before = transcriptData.recordIds.length;
 
