@@ -13,6 +13,8 @@ import type {
 } from './types.js';
 import { parseApplications, parseInterviews, parseMeetingSummary, readPagination } from './parsers.js';
 import { asString, isRecord } from './utils.js';
+import type { HttpClient } from './http-client.js';
+import { readPayloadBundle } from './payload-store.js';
 
 const HIRE_MODE_VALUES: Record<HireMode, 1 | 2> = {
   campus: 2,
@@ -129,16 +131,28 @@ export function defaultInterviewListBody(base: JsonRecord, now = Date.now()): Js
 export interface ListApplicationsOptions {
   requestBody?: JsonRecord;
   candidateName?: string;
+  page?: IPage;
+  bridge?: CDPBridge;
+}
+
+async function resolveBaseBody(options: ListApplicationsOptions): Promise<JsonRecord> {
+  if (options.requestBody) return { ...options.requestBody };
+  const cached = readPayloadBundle();
+  if (cached) return { ...cached.body };
+  if (options.page && options.bridge) {
+    // CDP path (login/status flow) — capture and rely on caller to persist.
+    return await discoverInterviewListPayload(options.page, options.bridge);
+  }
+  throw new CommandExecutionError(
+    'Moka interviewList 请求体模板缺失。请先运行 opencli moka login 或 opencli moka export-transcripts(默认走 CDP)一次,让 CLI 抓取并缓存请求体模板。',
+  );
 }
 
 export async function listApplications(
-  page: IPage,
-  bridge: CDPBridge,
+  client: HttpClient,
   options: ListApplicationsOptions = {},
 ): Promise<ApplicationRecord[]> {
-  const capturedBody = options.requestBody
-    ? { ...options.requestBody }
-    : await discoverInterviewListPayload(page, bridge);
+  const capturedBody = await resolveBaseBody(options);
   const queryBodies = options.requestBody
     ? [capturedBody]
     : [defaultInterviewListBody(capturedBody)];
@@ -147,9 +161,8 @@ export async function listApplications(
     let currentPage = 1;
     let totalPage = 1;
     do {
-      const response = await page.fetchJson(API_PATHS.interviewList, {
+      const response = await client.fetchJson(API_PATHS.interviewList, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: bodyForPage(baseBody, currentPage),
         timeoutMs: 30_000,
       });
@@ -172,12 +185,11 @@ export async function listApplications(
 }
 
 export async function listInterviews(
-  page: IPage,
+  client: HttpClient,
   application: ApplicationRecord,
 ): Promise<InterviewRecord[]> {
-  const response = await page.fetchJson(API_PATHS.interviewCard, {
+  const response = await client.fetchJson(API_PATHS.interviewCard, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: { applicationIds: [String(application.applicationId)] },
     timeoutMs: 30_000,
   });
@@ -186,13 +198,12 @@ export async function listInterviews(
 }
 
 export async function getMeetingSummary(
-  page: IPage,
+  client: HttpClient,
   applicationId: string | number,
   interviewId: string | number,
 ): Promise<MeetingSummaryRecord> {
-  const response = await page.fetchJson(API_PATHS.meetingSummary, {
+  const response = await client.fetchJson(API_PATHS.meetingSummary, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: { applicationId, interviewId },
     timeoutMs: 60_000,
   });

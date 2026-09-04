@@ -1,18 +1,23 @@
 ---
 name: moka-transcript-getter
-description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"时；支持环境安装、Moka CDP 登录、飞书用户授权、可选创建定时任务，以及定时分别覆盖导出校招和社招 JSON 后批量写入飞书 Base 并自动去重。
+description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到"定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。"或"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"时；支持环境安装、Moka CDP 登录、本地登录态持久化、飞书用户授权、可选创建默认模式(纯 HTTP、无需 CDP 常驻)或全模式(需 CDP 常驻切换校招/社招)的定时任务并批量写入飞书 Base 后自动去重。
 ---
 
 # Moka Transcript Getter
 
-只处理用户有权访问的 Moka 和飞书数据。通过本机 CDP Chrome 的已登录会话读取 Moka，通过 lark-cli 用户身份写入飞书 Base；绝不读取、复制、输出或持久化 Cookie、JWT、access token、密码、验证码等凭证。
+只处理用户有权访问的 Moka 和飞书数据。通过本机 CDP Chrome 的已登录会话读取 Moka，通过 lark-cli 用户身份写入飞书 Base。
+
+**凭证边界**：
+- Agent 层（对话回复、日志摘要、错误信息、临时文件名、脚本 stdout）**不得读取、复制、回显或持久化**任何 Cookie、JWT、access token、密码、验证码。
+- CLI 插件（`opencli moka`）**内部**为了支持默认模式定时任务在 Chrome 被关闭时也能采集，允许把 `.mokahr.com` 域下的 Moka session cookie 明文落盘到 `~/.opencli/mokaData/moka-cookies.json`（仅当前 OS 用户账户可读）。该文件由 CLI 内部读写，Agent 不得读取、cat、上传、转发或在对话/日志中回显该文件内容。
 
 ## 路由
 
 根据请求选择且只执行一个入口：
 
 1. 用户要求"配置环境并登录"或同义表达：执行"首次配置入口"。
-2. 请求内容为或明确表达"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"：执行"定时采集入口"。
+2. 请求内容为或明确表达"定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。"：执行"定时采集入口 · 默认模式"。
+3. 请求内容为或明确表达"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"：执行"定时采集入口 · 全模式"。
 
 ## 固定配置
 
@@ -22,8 +27,12 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 逻辑输出路径：`~/.opencli/mokaData/transcript.json`
 - Windows 实际路径：`$env:USERPROFILE\.opencli\mokaData\transcript.json`
 - macOS/Linux 实际路径：`$HOME/.opencli/mokaData/transcript.json`
-- 定时任务名称：`Moka转写抓取`
-- 定时任务指令：`定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。`
+- CLI 内部 Moka cookie 缓存：`~/.opencli/mokaData/moka-cookies.json`（仅 CLI 读写，Agent 不得读取）
+- CLI 内部 interviewList 请求体模板缓存：`~/.opencli/mokaData/moka-interview-list-payload.json`
+- 定时任务名称（默认模式）：`Moka转写抓取-默认模式`
+- 定时任务指令（默认模式）：`定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。`
+- 定时任务名称（全模式）：`Moka转写抓取-全模式`
+- 定时任务指令（全模式）：`定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。`
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`当前助手自身`
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
@@ -152,29 +161,52 @@ lark-cli 授权通过后，用选项框让用户选择飞书多维表格的来�
 
 后续所有飞书写入操作从该文件读取 `feishu_base_url`。配置已存在且用户选择"使用已有"时跳过写入。
 
-### 4. 打开 Moka 登录窗口并暂停
+### 4. 确保本地 Moka 登录态存在且有效
 
-执行：
+Moka 登录态存放在 CDP 专用 Chrome 的独立 user data 目录里（cookie/localStorage 落盘）。默认模式采集**不需要 CDP 常驻**，全模式采集**需要 CDP 常驻**用于切换校招/社招时的 DOM 点击。但无论后续选哪种采集模式，本步骤都必须保证"进入下一步之前，本地存在一份有效的 Moka 登录态"。
 
-```text
-opencli moka login -f json
-```
-
-该命令应打开使用独立用户目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复"登录好了"。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
-
-### 5. 用户回复 Moka 登录完成后验证
-
-执行：
+先直接校验：
 
 ```text
 opencli moka status -f json
 ```
 
-只有输出包含 `mokaLogin: authenticated` 才算成功。否则让用户继续在已打开的 Chrome 中完成登录并再次回复；不要进入定时任务步骤。
+- 若输出 `mokaLogin: authenticated`：本地已有有效登录态，跳过本步剩余流程，进入下一步。
+- 若报 CDP 未连接、未登录或登录态失效，进入下面的强制登录流程。
 
-### 6. 询问是否创建定时任务
+强制登录流程：
 
-Moka 登录和飞书 user 授权都验证成功后，只问："是否创建 Moka 转写抓取定时任务？"
+```text
+opencli moka login -f json
+```
+
+该命令打开使用独立用户数据目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复"登录好了"。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
+
+用户回复完成后再次校验：
+
+```text
+opencli moka status -f json
+```
+
+只有输出 `mokaLogin: authenticated` 才算成功；否则让用户继续在已打开的 Chrome 中完成登录并再次回复。**必须**在本步骤退出前拿到一次成功校验，不能带着"未认证"状态进入下一步。
+
+校验成功后登录态已落盘到 user data 目录。此时 Chrome 可以继续开着（后面选全模式时正好复用），也可以关掉（后面选默认模式时不需要，磁盘 cookie 仍然有效）——不要在本步骤主动关闭 Chrome，交给下一步根据采集模式决定。
+
+### 5. 选择采集模式并（可选）创建定时任务
+
+本地登录态确认有效后，先问采集模式：
+
+| 选项 | 说明 | 对 CDP 的要求 |
+|------|------|---------------|
+| 默认模式（推荐日常使用） | 只抓取当前 Moka 账号默认模式下的转写数据，采集期间**不需要 CDP 常驻**，Chrome 可完全关闭 | 采集时无需 Chrome 运行；靠磁盘 cookie 直接走 HTTP |
+| 全模式（校招 + 社招） | 依次切换到校招模式和社招模式各导出一次，覆盖两类岗位 | 采集时**必须 CDP 常驻**——模式切换需要通过 DOM 点击完成 |
+
+用户选择后：
+
+- **选默认模式**：告知用户 Chrome 可以关闭（保留 user data 目录即可），随后进入下一步询问是否创建定时任务。
+- **选全模式**：告知用户不能关闭当前 CDP Chrome，需要在后续定时任务运行期间保持 Chrome 进程存活；若 HR 关闭了它，全模式定时任务运行时会中断并提示。
+
+无论选哪种模式，都问一次："是否创建对应的定时任务？"
 
 - 用户选择否：简洁确认环境和登录已配置，结束。
 - 用户选择是：再单独询问执行时机。接受"每隔 N 小时""每天 HH:mm""工作日每天 HH:mm"等自然语言。
@@ -187,35 +219,91 @@ Moka 登录和飞书 user 授权都验证成功后，只问："是否创建 Moka
 
 若用户表达无法无歧义映射为 Cron，先澄清，不要猜测。创建前向用户复述时间和 Cron。
 
-使用宿主 Agent 的定时任务/自动化创建能力创建任务，字段必须是：
+根据步骤开头的采集模式选择对应字段：
+
+**默认模式**：
 
 ```text
-任务名称：Moka转写抓取
+任务名称：Moka转写抓取-默认模式
+任务指令：定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。
+Cron：<根据用户执行时机生成>
+时区：Asia/Shanghai
+执行 Agent：当前助手自身
+```
+
+**全模式**：
+
+```text
+任务名称：Moka转写抓取-全模式
 任务指令：定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。
 Cron：<根据用户执行时机生成>
 时区：Asia/Shanghai
 执行 Agent：当前助手自身
 ```
 
-只有工具明确返回创建成功后才能汇报成功；若当前宿主没有定时任务能力，明确说明无法创建，不要伪造结果。
+使用宿主 Agent 的定时任务/自动化创建能力创建任务。只有工具明确返回创建成功后才能汇报成功；若当前宿主没有定时任务能力，明确说明无法创建，不要伪造结果。
 
-## 定时采集入口
+若用户选择全模式且创建了定时任务，在最终汇报中额外提醒："全模式定时任务运行期间 CDP Chrome 必须保持开启，否则任务会中断"。
 
-该入口面向无人值守运行。不要重复安装环境；检查 Moka CDP 登录态、lark-cli user 授权，然后按"单模式覆盖导出 → 批量写入飞书 → 去重清理"的顺序采集。
+## 定时采集入口 · 默认模式
 
-### 1. 检查 Moka 和飞书状态
+该入口面向无人值守运行，只抓取当前 Moka 账号默认模式下的转写数据。**不检测 CDP、不检查 Moka 登录态、不检查 lark-cli 授权**——首次配置入口已经确保这些落地了，进入本入口时默认它们仍然有效。异常时（导出报未登录、写入报授权失败等）中断并汇报，让 HR 回到首次配置入口处理。
+
+### 1. 覆盖导出后批量写入飞书
+
+解析默认 JSON 的绝对路径，执行：
+
+```text
+opencli moka export-transcripts --no-cdp --output "<绝对输出路径>" --overwrite -f json
+```
+
+`--no-cdp` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。
+
+若导出报错为"未登录 / 登录态失效"，中断本次采集，汇报"Moka 登录态失效，需要 HR 重新执行首次配置入口的登录步骤"，不要在定时任务里尝试自动打开 Chrome。
+
+导出成功后，解析当前 Skill 目录和 JSON 绝对路径，执行：
+
+```text
+node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
+```
+
+若 `lark-cli` 不在当前 PATH，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，加 `--lark-cli "<路径>"` 参数。不要修改用户的全局 PATH。
+
+只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算写入成功。sync 脚本不查飞书是否已有记录，直接批量写入，重复交给下一步去重清理。
+
+若写入报错为 lark-cli 未授权或缺 scope，中断本次采集并汇报"飞书授权失效，需要 HR 重新执行首次配置入口的 lark-cli 授权步骤"。
+
+### 2. 飞书去重清理
+
+无论是否有重复都执行：
+
+```text
+node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
+```
+
+去重与删除策略同全模式入口第 4 步，见下方全模式入口内的说明。
+
+### 3. 汇总本次结果
+
+规则同全模式入口第 5 步的姓名脱敏规则和汇报字段，但**只汇报默认模式一份导出结果**，不区分校招/社招。
+
+## 定时采集入口 · 全模式
+
+该入口面向无人值守运行，依次抓取校招和社招两类岗位的转写数据。**依赖 CDP Chrome 常驻**——切换校招/社招模式必须通过 DOM 点击完成。不检查 lark-cli 授权和 Moka 登录态本身（首次配置入口已保证），但**必须检测 CDP 是否连接**——CDP 断开时直接中断。
+
+### 1. 检测 CDP 是否可用
 
 执行：
 
 ```text
 opencli moka status -f json
-lark-cli auth status --json --verify
 ```
 
-- Moka 已认证且 lark-cli user 身份 `verified == true` 时继续。
-- 若 CDP 未连接，执行一次 `opencli moka login -f json` 尝试恢复专用 Chrome，再检查状态。
-- 若 Moka 仍未连接或登录失效，停止本次采集并汇报"需要 HR 在 Moka 专用 Chrome 中重新登录"。
-- 若 lark-cli 未配置、user 授权失效或 Base 无权访问，停止本次采集并汇报需要 HR 重新完成飞书授权。
+- 输出包含 `mokaLogin: authenticated` 且 CDP 已连接：继续。
+- CDP 未连接或 Chrome 已被关闭：**中断本次采集**，汇报"全模式定时任务需要 CDP Chrome 常驻，当前 Chrome 未运行；请 HR 重新执行 `opencli moka login` 拉起 CDP 后再等待下次触发"。**不要**在定时任务里尝试自动 `opencli moka login`——那会弹出 Chrome 窗口，无人值守场景下没有意义。
+- Moka 登录态失效：中断并汇报"Moka 登录态失效，需要 HR 回到首次配置入口重新登录"。
+
+lark-cli 授权失效的场景不在本步骤主动预检，交给 sync/dedup 脚本自然报错后中断。
 
 **lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync 和 dedup 脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
@@ -230,15 +318,15 @@ opencli moka mode campus -f json
 opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f json
 ```
 
-确认导出成功后，解析当前 Skill 目录和 JSON 绝对路径，执行：
+`opencli moka mode campus` 通过 CDP 执行 DOM 点击切换到校招模式——这是本入口需要 Chrome 常驻的唯一原因。若该命令报 CDP 断开或 DOM 元素找不到，中断并汇报。
+
+确认导出成功后，执行：
 
 ```text
 node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 ```
 
-如果 `lark-cli` 已安装但不在当前 PATH，先定位真实可执行文件，再增加 `--lark-cli "<可执行文件路径>"`；不要修改用户的全局 PATH。只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算校招落库成功。
-
-sync 脚本不查飞书是否已有记录，直接批量写入。如果写入到一半中断导致重复，由最后的去重步骤统一清理。
+只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算校招落库成功。sync 脚本不查飞书是否已有记录，直接批量写入；如果写入到一半中断导致重复，由最后的去重步骤统一清理。
 
 ### 3. 社招：再次覆盖后批量写入飞书
 
@@ -298,7 +386,7 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 最后汇报：
 
-- 校招、社招分别是否导出成功、是否写入飞书成功
+- 校招、社招分别是否导出成功、是否写入飞书成功（默认模式入口只汇报默认模式一份）
 - 本次输入去重后的记录数
 - 新增面试记录数、batch-create 是否降级
 - 去重结果：面试转写表删除数/失败数
@@ -307,7 +395,7 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 - 飞书 Base 链接
 - 若有错误，列出阶段和简短错误原因
 
-不要汇报逐字稿正文。没有今日记录时明确说"今日没有可导出的面试记录"，仍报告两个模式状态、JSON 路径和 Base 链接。
+不要汇报逐字稿正文。没有今日记录时明确说"今日没有可导出的面试记录"，仍报告采集状态、JSON 路径和 Base 链接。
 
 ## 安全与边界
 

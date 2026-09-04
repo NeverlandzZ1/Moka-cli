@@ -197,6 +197,36 @@ function parsePossiblyEncodedJson(value) {
   }
 }
 
+// src/payload-store.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync, writeFileSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname, join as join2 } from "node:path";
+function defaultPayloadPath() {
+  return join2(homedir2(), ".opencli", "mokaData", "moka-interview-list-payload.json");
+}
+function ensureParentDir(filePath) {
+  const parent = dirname(filePath);
+  if (!existsSync2(parent)) mkdirSync2(parent, { recursive: true });
+}
+function readPayloadBundle(path = defaultPayloadPath()) {
+  if (!existsSync2(path)) return void 0;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (!isRecord(parsed) || !isRecord(parsed.body)) return void 0;
+    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : (/* @__PURE__ */ new Date(0)).toISOString();
+    return { updatedAt, body: parsed.body };
+  } catch {
+    return void 0;
+  }
+}
+function writePayloadBundle(body, path = defaultPayloadPath()) {
+  ensureParentDir(path);
+  const bundle = { updatedAt: (/* @__PURE__ */ new Date()).toISOString(), body };
+  writeFileSync(path, `${JSON.stringify(bundle, null, 2)}
+`, "utf8");
+  return bundle;
+}
+
 // src/cdp.ts
 function endpointForPort(port = DEFAULT_CDP_PORT) {
   return `http://127.0.0.1:${port}`;
@@ -318,6 +348,10 @@ async function discoverInterviewListPayload(page, bridge, timeoutSeconds = 15) {
         INTERVIEW_LIST_PAYLOAD_CACHE_KEY,
         JSON.stringify(payload)
       );
+      try {
+        writePayloadBundle(payload);
+      } catch {
+      }
       return payload;
     } catch (error) {
       if (!(error instanceof Error) || error.message !== "INTERVIEW_LIST_CAPTURE_TIMEOUT") throw error;
@@ -349,8 +383,8 @@ async function discoverInterviewListPayload(page, bridge, timeoutSeconds = 15) {
 }
 
 // src/collector.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname2, resolve } from "node:path";
 
 // src/moka-api.ts
 import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
@@ -584,17 +618,27 @@ function defaultInterviewListBody(base, now = Date.now()) {
     pageSize: shared.pageSize ?? 10
   };
 }
-async function listApplications(page, bridge, options = {}) {
-  const capturedBody = options.requestBody ? { ...options.requestBody } : await discoverInterviewListPayload(page, bridge);
+async function resolveBaseBody(options) {
+  if (options.requestBody) return { ...options.requestBody };
+  const cached = readPayloadBundle();
+  if (cached) return { ...cached.body };
+  if (options.page && options.bridge) {
+    return await discoverInterviewListPayload(options.page, options.bridge);
+  }
+  throw new CommandExecutionError(
+    "Moka interviewList \u8BF7\u6C42\u4F53\u6A21\u677F\u7F3A\u5931\u3002\u8BF7\u5148\u8FD0\u884C opencli moka login \u6216 opencli moka export-transcripts(\u9ED8\u8BA4\u8D70 CDP)\u4E00\u6B21,\u8BA9 CLI \u6293\u53D6\u5E76\u7F13\u5B58\u8BF7\u6C42\u4F53\u6A21\u677F\u3002"
+  );
+}
+async function listApplications(client, options = {}) {
+  const capturedBody = await resolveBaseBody(options);
   const queryBodies = options.requestBody ? [capturedBody] : [defaultInterviewListBody(capturedBody)];
   const records = /* @__PURE__ */ new Map();
   for (const baseBody of queryBodies) {
     let currentPage = 1;
     let totalPage = 1;
     do {
-      const response = await page.fetchJson(API_PATHS.interviewList, {
+      const response = await client.fetchJson(API_PATHS.interviewList, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: bodyForPage(baseBody, currentPage),
         timeoutMs: 3e4
       });
@@ -612,20 +656,18 @@ async function listApplications(page, bridge, options = {}) {
   const needle = options.candidateName?.trim().toLocaleLowerCase();
   return needle ? all.filter((item) => item.candidateName.toLocaleLowerCase().includes(needle)) : all;
 }
-async function listInterviews(page, application) {
-  const response = await page.fetchJson(API_PATHS.interviewCard, {
+async function listInterviews(client, application) {
+  const response = await client.fetchJson(API_PATHS.interviewCard, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: { applicationIds: [String(application.applicationId)] },
     timeoutMs: 3e4
   });
   assertApiResponse(response, "interviewCard");
   return parseInterviews(response, application);
 }
-async function getMeetingSummary(page, applicationId, interviewId) {
-  const response = await page.fetchJson(API_PATHS.meetingSummary, {
+async function getMeetingSummary(client, applicationId, interviewId) {
+  const response = await client.fetchJson(API_PATHS.meetingSummary, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: { applicationId, interviewId },
     timeoutMs: 6e4
   });
@@ -633,15 +675,15 @@ async function getMeetingSummary(page, applicationId, interviewId) {
 }
 
 // src/collector.ts
-async function collectTranscripts(page, bridge, options = {}) {
-  const applications = await listApplications(page, bridge, options);
+async function collectTranscripts(client, options = {}) {
+  const applications = await listApplications(client, options);
   const records = [];
   const errors = [];
   let interviewCount = 0;
   for (const application of applications) {
     let interviews;
     try {
-      interviews = await listInterviews(page, application);
+      interviews = await listInterviews(client, application);
     } catch (error) {
       errors.push({
         applicationId: application.applicationId,
@@ -654,7 +696,7 @@ async function collectTranscripts(page, bridge, options = {}) {
     for (const interview of interviews) {
       try {
         const summary = await getMeetingSummary(
-          page,
+          client,
           interview.applicationId,
           interview.interviewId
         );
@@ -687,10 +729,10 @@ function recordKey(record) {
   return `${String(record.applicationId)}:${String(record.interviewId)}`;
 }
 function readExistingCollection(path) {
-  if (!existsSync2(path)) return void 0;
+  if (!existsSync3(path)) return void 0;
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(readFileSync2(path, "utf8"));
   } catch (error) {
     throw new Error(`\u5DF2\u6709\u5BFC\u51FA\u6587\u4EF6\u4E0D\u662F\u6709\u6548 JSON\uFF0C\u5DF2\u505C\u6B62\u5199\u5165\u4EE5\u907F\u514D\u8986\u76D6\uFF1A${path}\uFF08${errorMessage(error)}\uFF09`);
   }
@@ -724,12 +766,246 @@ function mergeCollections(existing, latest) {
 }
 function writeCollection(outputPath, latest, options = {}) {
   const absolutePath = resolve(outputPath);
-  const parentDirectory = dirname(absolutePath);
-  if (!existsSync2(parentDirectory)) mkdirSync2(parentDirectory, { recursive: true });
+  const parentDirectory = dirname2(absolutePath);
+  if (!existsSync3(parentDirectory)) mkdirSync3(parentDirectory, { recursive: true });
   const result = options.overwrite ? latest : mergeCollections(readExistingCollection(absolutePath), latest);
-  writeFileSync(absolutePath, `${JSON.stringify(result, null, 2)}
+  writeFileSync2(absolutePath, `${JSON.stringify(result, null, 2)}
 `, "utf8");
   return { outputPath: absolutePath, result };
+}
+
+// src/cookie-store.ts
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname3, join as join3 } from "node:path";
+var MOKA_COOKIE_DOMAIN_SUFFIX = ".mokahr.com";
+function defaultCookiePath() {
+  return join3(homedir3(), ".opencli", "mokaData", "moka-cookies.json");
+}
+function ensureParentDir2(filePath) {
+  const parent = dirname3(filePath);
+  if (!existsSync4(parent)) mkdirSync4(parent, { recursive: true });
+}
+function toStoredCookie(raw) {
+  if (!isRecord(raw)) return void 0;
+  const name = typeof raw.name === "string" ? raw.name : "";
+  const value = typeof raw.value === "string" ? raw.value : "";
+  const domain = typeof raw.domain === "string" ? raw.domain : "";
+  const path = typeof raw.path === "string" ? raw.path : "/";
+  if (!name || !domain) return void 0;
+  const cookie = { name, value, domain, path };
+  if (typeof raw.expires === "number") cookie.expires = raw.expires;
+  if (typeof raw.httpOnly === "boolean") cookie.httpOnly = raw.httpOnly;
+  if (typeof raw.secure === "boolean") cookie.secure = raw.secure;
+  if (typeof raw.sameSite === "string") cookie.sameSite = raw.sameSite;
+  return cookie;
+}
+function domainMatches(cookieDomain, host) {
+  const normalized = cookieDomain.startsWith(".") ? cookieDomain.slice(1) : cookieDomain;
+  return host === normalized || host.endsWith(`.${normalized}`);
+}
+function isSessionCookieValid(cookie) {
+  if (typeof cookie.expires !== "number" || cookie.expires <= 0) return true;
+  return cookie.expires * 1e3 > Date.now();
+}
+function readCookieBundle(path = defaultCookiePath()) {
+  if (!existsSync4(path)) return void 0;
+  try {
+    const parsed = JSON.parse(readFileSync3(path, "utf8"));
+    if (!isRecord(parsed) || !Array.isArray(parsed.cookies)) return void 0;
+    const cookies = parsed.cookies.map(toStoredCookie).filter((cookie) => Boolean(cookie));
+    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : (/* @__PURE__ */ new Date(0)).toISOString();
+    return { updatedAt, cookies };
+  } catch {
+    return void 0;
+  }
+}
+function writeCookieBundle(bundle, path = defaultCookiePath()) {
+  ensureParentDir2(path);
+  const payload = { updatedAt: bundle.updatedAt, cookies: bundle.cookies };
+  writeFileSync3(path, `${JSON.stringify(payload, null, 2)}
+`, "utf8");
+}
+function cookieHeaderFor(host, bundle) {
+  const parts = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const cookie of bundle.cookies) {
+    if (!domainMatches(cookie.domain, host)) continue;
+    if (!isSessionCookieValid(cookie)) continue;
+    if (seen.has(cookie.name)) continue;
+    seen.add(cookie.name);
+    parts.push(`${cookie.name}=${cookie.value}`);
+  }
+  return parts.join("; ");
+}
+function parseSetCookieAttrs(parts) {
+  const attrs = {};
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    const key = eq === -1 ? trimmed.toLowerCase() : trimmed.slice(0, eq).trim().toLowerCase();
+    const value = eq === -1 ? "" : trimmed.slice(eq + 1).trim();
+    if (key === "domain") attrs.domain = value.startsWith(".") ? value : `.${value}`;
+    else if (key === "path") attrs.path = value || "/";
+    else if (key === "expires") {
+      const parsedDate = Date.parse(value);
+      if (!Number.isNaN(parsedDate)) attrs.expires = Math.floor(parsedDate / 1e3);
+    } else if (key === "max-age") {
+      const seconds = Number(value);
+      if (Number.isFinite(seconds)) attrs.expires = Math.floor(Date.now() / 1e3) + seconds;
+    } else if (key === "httponly") attrs.httpOnly = true;
+    else if (key === "secure") attrs.secure = true;
+    else if (key === "samesite") attrs.sameSite = value;
+  }
+  return attrs;
+}
+function mergeSetCookieHeaders(existing, setCookieHeaders, requestHost) {
+  const map = /* @__PURE__ */ new Map();
+  for (const cookie of existing?.cookies ?? []) {
+    map.set(`${cookie.domain}|${cookie.path}|${cookie.name}`, cookie);
+  }
+  for (const rawHeader of setCookieHeaders) {
+    const [nameValue, ...rest] = rawHeader.split(";");
+    if (!nameValue) continue;
+    const eq = nameValue.indexOf("=");
+    if (eq === -1) continue;
+    const name = nameValue.slice(0, eq).trim();
+    const value = nameValue.slice(eq + 1).trim();
+    if (!name) continue;
+    const attrs = parseSetCookieAttrs(rest);
+    const cookie = {
+      name,
+      value,
+      domain: attrs.domain || `.${requestHost}`,
+      path: attrs.path || "/",
+      ...attrs.expires === void 0 ? {} : { expires: attrs.expires },
+      ...attrs.httpOnly === void 0 ? {} : { httpOnly: attrs.httpOnly },
+      ...attrs.secure === void 0 ? {} : { secure: attrs.secure },
+      ...attrs.sameSite === void 0 ? {} : { sameSite: attrs.sameSite }
+    };
+    if (typeof cookie.expires === "number" && cookie.expires <= Math.floor(Date.now() / 1e3)) {
+      map.delete(`${cookie.domain}|${cookie.path}|${cookie.name}`);
+      continue;
+    }
+    map.set(`${cookie.domain}|${cookie.path}|${cookie.name}`, cookie);
+  }
+  return {
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    cookies: [...map.values()]
+  };
+}
+async function dumpCookiesFromBridge(bridge, path = defaultCookiePath()) {
+  const response = await bridge.send("Network.getAllCookies");
+  const cookies = isRecord(response) && Array.isArray(response.cookies) ? response.cookies.map(toStoredCookie).filter((cookie) => cookie !== void 0 && cookie.domain.endsWith(MOKA_COOKIE_DOMAIN_SUFFIX)) : [];
+  const bundle = {
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    cookies
+  };
+  writeCookieBundle(bundle, path);
+  return { path, cookieCount: cookies.length };
+}
+
+// src/http-client.ts
+import { AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
+var DEFAULT_HEADERS = {
+  "accept": "application/json, text/plain, */*",
+  "accept-language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+  "origin": MOKA_ORIGIN,
+  "referer": `${MOKA_ORIGIN}/interviews/overview`,
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+};
+function collectSetCookieHeaders(headers) {
+  const rawGetter = headers.getSetCookie;
+  if (typeof rawGetter === "function") return rawGetter.call(headers);
+  const single = headers.get("set-cookie");
+  return single ? [single] : [];
+}
+function createHttpClient(options = {}) {
+  const cookiePath = options.cookiePath ?? defaultCookiePath();
+  let bundle = options.bundle ?? readCookieBundle(cookiePath);
+  if (!bundle || bundle.cookies.length === 0) {
+    throw new AuthRequiredError2(
+      "app.mokahr.com",
+      "\u672C\u5730\u6CA1\u6709\u53EF\u7528\u7684 Moka \u767B\u5F55\u6001\u3002\u8BF7\u5148\u8FD0\u884C opencli moka login \u8BA9 CDP Chrome \u767B\u5F55\u4E00\u6B21\u3002"
+    );
+  }
+  const host = new URL(MOKA_ORIGIN).host;
+  async function fetchJson(path, opts = {}) {
+    const method = opts.method ?? "POST";
+    const cookieHeader = cookieHeaderFor(host, bundle);
+    if (!cookieHeader) {
+      throw new AuthRequiredError2(
+        "app.mokahr.com",
+        "\u672C\u5730 Moka cookie \u5DF2\u5168\u90E8\u8FC7\u671F,\u8BF7\u91CD\u65B0\u8FD0\u884C opencli moka login \u4EE5\u5237\u65B0\u767B\u5F55\u6001\u3002"
+      );
+    }
+    const headers = {
+      ...DEFAULT_HEADERS,
+      ...opts.headers ?? {},
+      cookie: cookieHeader
+    };
+    if (opts.body !== void 0 && !headers["content-type"]) {
+      headers["content-type"] = "application/json";
+    }
+    const controller = new AbortController();
+    const timeoutMs = opts.timeoutMs ?? 3e4;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      const init = {
+        method,
+        headers,
+        signal: controller.signal,
+        redirect: "manual"
+      };
+      if (opts.body !== void 0) init.body = JSON.stringify(opts.body);
+      response = await fetch(`${MOKA_ORIGIN}${path}`, init);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CommandExecutionError2(`Moka ${path} \u8BF7\u6C42\u5931\u8D25: ${message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    const setCookies = collectSetCookieHeaders(response.headers);
+    if (setCookies.length > 0) {
+      bundle = mergeSetCookieHeaders(bundle, setCookies, host);
+      writeCookieBundle(bundle, cookiePath);
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthRequiredError2(
+        "app.mokahr.com",
+        `Moka \u767B\u5F55\u6001\u5931\u6548: HTTP ${response.status}\u3002\u8BF7\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
+      );
+    }
+    if (response.status >= 300 && response.status < 400) {
+      throw new AuthRequiredError2(
+        "app.mokahr.com",
+        `Moka \u8FD4\u56DE ${response.status} \u91CD\u5B9A\u5411,\u901A\u5E38\u8868\u793A\u767B\u5F55\u6001\u5DF2\u5931\u6548\u3002\u8BF7\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
+      );
+    }
+    const contentType = response.headers.get("content-type") || "";
+    const text = await response.text();
+    let json;
+    if (text && contentType.includes("application/json")) {
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new CommandExecutionError2(`Moka ${path} \u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94`);
+      }
+    } else if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch {
+      }
+    }
+    if (!response.ok) {
+      const detail = isRecord(json) && typeof json.msg === "string" ? json.msg : text.trim() || response.statusText;
+      throw new CommandExecutionError2(`Moka ${path} \u5931\u8D25: HTTP ${response.status} ${detail}`);
+    }
+    return json ?? {};
+  }
+  return { fetchJson };
 }
 
 // src/plugin.ts
@@ -738,6 +1014,12 @@ var commonPortArg = {
   type: "int",
   default: DEFAULT_CDP_PORT,
   help: "Chrome CDP \u7AEF\u53E3\uFF0C\u9ED8\u8BA4 9222"
+};
+var noCdpArg = {
+  name: "no-cdp",
+  type: "boolean",
+  default: false,
+  help: "\u9ED8\u8BA4\u6A21\u5F0F\uFF1A\u8DF3\u8FC7 CDP Chrome\uFF0C\u76F4\u63A5\u7528\u672C\u5730\u7F13\u5B58\u7684\u767B\u5F55\u6001\u53D1 HTTP \u8BF7\u6C42"
 };
 function intArg(value, fallback) {
   const parsed = Number(value ?? fallback);
@@ -768,6 +1050,18 @@ function collectionOptions(kwargs) {
     ...requestBody ? { requestBody } : {}
   };
 }
+async function withHttpClient(kwargs, fn) {
+  const noCdp = Boolean(kwargs["noCdp"] ?? kwargs["no-cdp"]);
+  if (noCdp) {
+    const client = createHttpClient();
+    return fn(client, {});
+  }
+  return withMokaPage(intArg(kwargs.port, DEFAULT_CDP_PORT), async (page, bridge) => {
+    await dumpCookiesFromBridge(bridge).catch(() => void 0);
+    const client = createHttpClient();
+    return fn(client, { page, bridge });
+  });
+}
 cli({
   site: "moka",
   name: "login",
@@ -791,7 +1085,13 @@ cli({
       ...typeof kwargs.chromePath === "string" ? { chromePath: kwargs.chromePath } : {},
       ...typeof kwargs.profileDir === "string" ? { profileDir: kwargs.profileDir } : {}
     });
-    const status = await withMokaPage(port, async (page) => probeMokaLogin(page));
+    const status = await withMokaPage(port, async (page, bridge) => {
+      const probe = await probeMokaLogin(page);
+      if (probe.mokaLogin === "authenticated") {
+        await dumpCookiesFromBridge(bridge).catch(() => void 0);
+      }
+      return probe;
+    });
     return [{
       ...status,
       launched: launch.launched,
@@ -815,7 +1115,13 @@ cli({
   columns: ["browser", "mokaLogin", "message", "pageUrl"],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page) => [await probeMokaLogin(page)]
+    async (page, bridge) => {
+      const probe = await probeMokaLogin(page);
+      if (probe.mokaLogin === "authenticated") {
+        await dumpCookiesFromBridge(bridge).catch(() => void 0);
+      }
+      return [probe];
+    }
   )
 });
 cli({
@@ -834,7 +1140,11 @@ cli({
   columns: ["mode", "modeLabel", "currentHireMode"],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page, bridge) => [await setHireMode(page, bridge, hireModeArg(kwargs.mode))]
+    async (page, bridge) => {
+      const result = await setHireMode(page, bridge, hireModeArg(kwargs.mode));
+      await dumpCookiesFromBridge(bridge).catch(() => void 0);
+      return [result];
+    }
   )
 });
 cli({
@@ -848,14 +1158,16 @@ cli({
   defaultFormat: "json",
   args: [
     commonPortArg,
+    noCdpArg,
     { name: "candidate", valueRequired: true, help: "\u6309\u5019\u9009\u4EBA\u59D3\u540D\u7B5B\u9009" },
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],
   columns: ["applicationId", "candidateName", "jobTitle", "overviewStartTimeIso"],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page, bridge) => listApplications(page, bridge, collectionOptions(kwargs))
-  )
+  func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => listApplications(client, {
+    ...collectionOptions(kwargs),
+    ...ctx.page ? { page: ctx.page } : {},
+    ...ctx.bridge ? { bridge: ctx.bridge } : {}
+  }))
 });
 cli({
   site: "moka",
@@ -868,20 +1180,18 @@ cli({
   defaultFormat: "json",
   args: [
     { name: "application-id", positional: true, required: true, help: "\u5E94\u8058\u8BB0\u5F55 ID" },
-    commonPortArg
+    commonPortArg,
+    noCdpArg
   ],
   columns: ["applicationId", "interviewId", "candidateName", "jobTitle", "interviewerNames", "roundName", "startTime"],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page) => {
-      const application = {
-        applicationId: idArg(kwargs["application-id"], "application-id"),
-        candidateName: "",
-        jobTitle: ""
-      };
-      return listInterviews(page, application);
-    }
-  )
+  func: async (kwargs) => withHttpClient(kwargs, async (client) => {
+    const application = {
+      applicationId: idArg(kwargs["application-id"], "application-id"),
+      candidateName: "",
+      jobTitle: ""
+    };
+    return listInterviews(client, application);
+  })
 });
 cli({
   site: "moka",
@@ -895,20 +1205,18 @@ cli({
   args: [
     { name: "application-id", positional: true, required: true, help: "\u5E94\u8058\u8BB0\u5F55 ID" },
     { name: "interview-id", positional: true, required: true, help: "\u9762\u8BD5 ID" },
-    commonPortArg
+    commonPortArg,
+    noCdpArg
   ],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page) => [{
-      applicationId: idArg(kwargs["application-id"], "application-id"),
-      interviewId: idArg(kwargs["interview-id"], "interview-id"),
-      ...await getMeetingSummary(
-        page,
-        idArg(kwargs["application-id"], "application-id"),
-        idArg(kwargs["interview-id"], "interview-id")
-      )
-    }]
-  )
+  func: async (kwargs) => withHttpClient(kwargs, async (client) => {
+    const applicationId = idArg(kwargs["application-id"], "application-id");
+    const interviewId = idArg(kwargs["interview-id"], "interview-id");
+    return [{
+      applicationId,
+      interviewId,
+      ...await getMeetingSummary(client, applicationId, interviewId)
+    }];
+  })
 });
 cli({
   site: "moka",
@@ -922,19 +1230,21 @@ cli({
   defaultFormat: "json",
   args: [
     commonPortArg,
+    noCdpArg,
     { name: "candidate", valueRequired: true, help: "\u6309\u5019\u9009\u4EBA\u59D3\u540D\u7B5B\u9009" },
     { name: "output", valueRequired: true, help: "JSON \u6587\u4EF6\u8F93\u51FA\u8DEF\u5F84" },
     { name: "overwrite", type: "boolean", default: false, help: "\u53EA\u4FDD\u5B58\u672C\u6B21\u7ED3\u679C\uFF0C\u76F4\u63A5\u8986\u76D6\u540C\u540D JSON \u6587\u4EF6" },
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page, bridge) => {
-      const result = await collectTranscripts(page, bridge, collectionOptions(kwargs));
-      const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) }) : void 0;
-      return written ? { ...written.result, outputPath: written.outputPath } : result;
-    }
-  )
+  func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => {
+    const result = await collectTranscripts(client, {
+      ...collectionOptions(kwargs),
+      ...ctx.page ? { page: ctx.page } : {},
+      ...ctx.bridge ? { bridge: ctx.bridge } : {}
+    });
+    const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) }) : void 0;
+    return written ? { ...written.result, outputPath: written.outputPath } : result;
+  })
 });
 var mokaApiPaths = API_PATHS;
 export {

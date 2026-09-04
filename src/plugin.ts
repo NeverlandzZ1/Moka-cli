@@ -6,6 +6,10 @@ import { probeMokaLogin, withMokaPage } from './cdp.js';
 import { collectTranscripts, writeCollection } from './collector.js';
 import { getMeetingSummary, listApplications, listInterviews, setHireMode } from './moka-api.js';
 import { parseJsonObject } from './utils.js';
+import { dumpCookiesFromBridge } from './cookie-store.js';
+import { createHttpClient, type HttpClient } from './http-client.js';
+import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
+import type { IPage } from '@jackwener/opencli/types';
 import type { ApplicationRecord, HireMode, Id, JsonRecord } from './types.js';
 
 const commonPortArg = {
@@ -13,6 +17,13 @@ const commonPortArg = {
   type: 'int',
   default: DEFAULT_CDP_PORT,
   help: 'Chrome CDP 端口，默认 9222',
+};
+
+const noCdpArg = {
+  name: 'no-cdp',
+  type: 'boolean',
+  default: false,
+  help: '默认模式：跳过 CDP Chrome，直接用本地缓存的登录态发 HTTP 请求',
 };
 
 function intArg(value: unknown, fallback: number): number {
@@ -54,6 +65,22 @@ function collectionOptions(kwargs: Record<string, unknown>): {
   };
 }
 
+async function withHttpClient<T>(
+  kwargs: Record<string, unknown>,
+  fn: (client: HttpClient, ctx: { page?: IPage; bridge?: CDPBridge }) => Promise<T>,
+): Promise<T> {
+  const noCdp = Boolean(kwargs['noCdp'] ?? kwargs['no-cdp']);
+  if (noCdp) {
+    const client = createHttpClient();
+    return fn(client, {});
+  }
+  return withMokaPage(intArg(kwargs.port, DEFAULT_CDP_PORT), async (page, bridge) => {
+    await dumpCookiesFromBridge(bridge).catch(() => undefined);
+    const client = createHttpClient();
+    return fn(client, { page, bridge });
+  });
+}
+
 cli({
   site: 'moka',
   name: 'login',
@@ -77,7 +104,13 @@ cli({
       ...(typeof kwargs.chromePath === 'string' ? { chromePath: kwargs.chromePath } : {}),
       ...(typeof kwargs.profileDir === 'string' ? { profileDir: kwargs.profileDir } : {}),
     });
-    const status = await withMokaPage(port, async (page) => probeMokaLogin(page));
+    const status = await withMokaPage(port, async (page, bridge) => {
+      const probe = await probeMokaLogin(page);
+      if (probe.mokaLogin === 'authenticated') {
+        await dumpCookiesFromBridge(bridge).catch(() => undefined);
+      }
+      return probe;
+    });
     return [{
       ...status,
       launched: launch.launched,
@@ -102,7 +135,13 @@ cli({
   columns: ['browser', 'mokaLogin', 'message', 'pageUrl'],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page) => [await probeMokaLogin(page)],
+    async (page, bridge) => {
+      const probe = await probeMokaLogin(page);
+      if (probe.mokaLogin === 'authenticated') {
+        await dumpCookiesFromBridge(bridge).catch(() => undefined);
+      }
+      return [probe];
+    },
   ),
 });
 
@@ -122,7 +161,11 @@ cli({
   columns: ['mode', 'modeLabel', 'currentHireMode'],
   func: async (kwargs) => withMokaPage(
     intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page, bridge) => [await setHireMode(page, bridge, hireModeArg(kwargs.mode))],
+    async (page, bridge) => {
+      const result = await setHireMode(page, bridge, hireModeArg(kwargs.mode));
+      await dumpCookiesFromBridge(bridge).catch(() => undefined);
+      return [result];
+    },
   ),
 });
 
@@ -137,14 +180,16 @@ cli({
   defaultFormat: 'json',
   args: [
     commonPortArg,
+    noCdpArg,
     { name: 'candidate', valueRequired: true, help: '按候选人姓名筛选' },
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
   columns: ['applicationId', 'candidateName', 'jobTitle', 'overviewStartTimeIso'],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page, bridge) => listApplications(page, bridge, collectionOptions(kwargs)),
-  ),
+  func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => listApplications(client, {
+    ...collectionOptions(kwargs),
+    ...(ctx.page ? { page: ctx.page } : {}),
+    ...(ctx.bridge ? { bridge: ctx.bridge } : {}),
+  })),
 });
 
 cli({
@@ -159,19 +204,17 @@ cli({
   args: [
     { name: 'application-id', positional: true, required: true, help: '应聘记录 ID' },
     commonPortArg,
+    noCdpArg,
   ],
   columns: ['applicationId', 'interviewId', 'candidateName', 'jobTitle', 'interviewerNames', 'roundName', 'startTime'],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page) => {
-      const application: ApplicationRecord = {
-        applicationId: idArg(kwargs['application-id'], 'application-id'),
-        candidateName: '',
-        jobTitle: '',
-      };
-      return listInterviews(page, application);
-    },
-  ),
+  func: async (kwargs) => withHttpClient(kwargs, async (client) => {
+    const application: ApplicationRecord = {
+      applicationId: idArg(kwargs['application-id'], 'application-id'),
+      candidateName: '',
+      jobTitle: '',
+    };
+    return listInterviews(client, application);
+  }),
 });
 
 cli({
@@ -187,19 +230,17 @@ cli({
     { name: 'application-id', positional: true, required: true, help: '应聘记录 ID' },
     { name: 'interview-id', positional: true, required: true, help: '面试 ID' },
     commonPortArg,
+    noCdpArg,
   ],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page) => [{
-      applicationId: idArg(kwargs['application-id'], 'application-id'),
-      interviewId: idArg(kwargs['interview-id'], 'interview-id'),
-      ...await getMeetingSummary(
-        page,
-        idArg(kwargs['application-id'], 'application-id'),
-        idArg(kwargs['interview-id'], 'interview-id'),
-      ),
-    }],
-  ),
+  func: async (kwargs) => withHttpClient(kwargs, async (client) => {
+    const applicationId = idArg(kwargs['application-id'], 'application-id');
+    const interviewId = idArg(kwargs['interview-id'], 'interview-id');
+    return [{
+      applicationId,
+      interviewId,
+      ...await getMeetingSummary(client, applicationId, interviewId),
+    }];
+  }),
 });
 
 cli({
@@ -214,23 +255,25 @@ cli({
   defaultFormat: 'json',
   args: [
     commonPortArg,
+    noCdpArg,
     { name: 'candidate', valueRequired: true, help: '按候选人姓名筛选' },
     { name: 'output', valueRequired: true, help: 'JSON 文件输出路径' },
     { name: 'overwrite', type: 'boolean', default: false, help: '只保存本次结果，直接覆盖同名 JSON 文件' },
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
-  func: async (kwargs) => withMokaPage(
-    intArg(kwargs.port, DEFAULT_CDP_PORT),
-    async (page, bridge) => {
-      const result = await collectTranscripts(page, bridge, collectionOptions(kwargs));
-      const written = typeof kwargs.output === 'string' && kwargs.output.trim()
-        ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) })
-        : undefined;
-      return written
-        ? { ...written.result, outputPath: written.outputPath }
-        : result;
-    },
-  ),
+  func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => {
+    const result = await collectTranscripts(client, {
+      ...collectionOptions(kwargs),
+      ...(ctx.page ? { page: ctx.page } : {}),
+      ...(ctx.bridge ? { bridge: ctx.bridge } : {}),
+    });
+    const written = typeof kwargs.output === 'string' && kwargs.output.trim()
+      ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) })
+      : undefined;
+    return written
+      ? { ...written.result, outputPath: written.outputPath }
+      : result;
+  }),
 });
 
 export const mokaApiPaths = API_PATHS;

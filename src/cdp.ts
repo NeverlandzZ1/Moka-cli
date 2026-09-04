@@ -4,6 +4,7 @@ import { BrowserConnectError, TimeoutError } from '@jackwener/opencli/errors';
 import { API_PATHS, DEFAULT_CDP_PORT, MOKA_ORIGIN, MOKA_OVERVIEW_URL } from './constants.js';
 import { isRecord, parseJsonObject } from './utils.js';
 import type { JsonRecord } from './types.js';
+import { writePayloadBundle } from './payload-store.js';
 
 export function endpointForPort(port = DEFAULT_CDP_PORT): string {
   return `http://127.0.0.1:${port}`;
@@ -171,6 +172,11 @@ export async function discoverInterviewListPayload(
         INTERVIEW_LIST_PAYLOAD_CACHE_KEY,
         JSON.stringify(payload),
       );
+      try {
+        writePayloadBundle(payload);
+      } catch {
+        // Persistence is best-effort; keep the freshly captured payload usable in memory.
+      }
       return payload;
     } catch (error) {
       if (!(error instanceof Error) || error.message !== 'INTERVIEW_LIST_CAPTURE_TIMEOUT') throw error;

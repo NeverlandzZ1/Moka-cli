@@ -4,19 +4,21 @@ import type { IPage } from '@jackwener/opencli/types';
 import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
 import type { CollectionResult, JsonRecord, TranscriptRecord } from './types.js';
 import { getMeetingSummary, listApplications, listInterviews } from './moka-api.js';
+import type { HttpClient } from './http-client.js';
 import { errorMessage } from './utils.js';
 
 export interface CollectOptions {
   requestBody?: JsonRecord;
   candidateName?: string;
+  page?: IPage;
+  bridge?: CDPBridge;
 }
 
 export async function collectTranscripts(
-  page: IPage,
-  bridge: CDPBridge,
+  client: HttpClient,
   options: CollectOptions = {},
 ): Promise<CollectionResult> {
-  const applications = await listApplications(page, bridge, options);
+  const applications = await listApplications(client, options);
   const records: CollectionResult['records'] = [];
   const errors: CollectionResult['errors'] = [];
   let interviewCount = 0;
@@ -24,7 +26,7 @@ export async function collectTranscripts(
   for (const application of applications) {
     let interviews;
     try {
-      interviews = await listInterviews(page, application);
+      interviews = await listInterviews(client, application);
     } catch (error) {
       errors.push({
         applicationId: application.applicationId,
@@ -37,7 +39,7 @@ export async function collectTranscripts(
     for (const interview of interviews) {
       try {
         const summary = await getMeetingSummary(
-          page,
+          client,
           interview.applicationId,
           interview.interviewId,
         );

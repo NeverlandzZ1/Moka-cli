@@ -2,15 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { IPage } from '@jackwener/opencli/types';
-import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
 import { collectTranscripts, mergeCollections, writeCollection } from '../src/collector.js';
+import type { HttpClient } from '../src/http-client.js';
 import type { CollectionResult, TranscriptRecord } from '../src/types.js';
 
 describe('collectTranscripts', () => {
   it('joins application, interview and transcript data', async () => {
-    const page = {
-      fetchJson: async (url: string, options: { body?: unknown }) => {
+    const client: HttpClient = {
+      fetchJson: async (url, options = {}) => {
         if (url.endsWith('/interviewList')) {
           return {
             code: 0,
@@ -48,9 +47,9 @@ describe('collectTranscripts', () => {
         }
         throw new Error(`unexpected URL: ${url}`);
       },
-    } as unknown as IPage;
+    };
 
-    const result = await collectTranscripts(page, {} as CDPBridge, {
+    const result = await collectTranscripts(client, {
       requestBody: { currentPage: 1, pageSize: 10 },
     });
 
