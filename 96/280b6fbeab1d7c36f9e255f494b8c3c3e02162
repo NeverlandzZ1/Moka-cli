@@ -1,0 +1,35 @@
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_d294e0beec767f 100-106
+  s_9d988f2c5f030f::t_0334d1b8b44efd 265,268
+  s_9d988f2c5f030f::t_79cbaba5bae6d9 99
+README.md
+  s_9d988f2c5f030f::t_e95451d611fb54 150,153,158,160,169,179
+  s_9d988f2c5f030f::t_cb8f9514b2e1a8 148-149,151-152,154-157,159,161-168,170,173,180-187
+src/plugin.ts
+  s_9d988f2c5f030f::t_9015a71bdf4c0c 23,26
+  s_9d988f2c5f030f::t_df62350b4edf00 72
+moka.js
+  s_9d988f2c5f030f::t_0cfd426acd2d6c 1019,1022,1054
+TESTING.md
+  s_9d988f2c5f030f::t_55dc45a4b4720e 100
+  s_9d988f2c5f030f::t_e46ad66eaa8427 85
+  s_9d988f2c5f030f::t_3aea41badffaa8 66,69-70,72-73,96,98-99,102,108-118,120
+  s_9d988f2c5f030f::t_321e1c8abe8755 75-83
+  s_9d988f2c5f030f::t_8d8762ac62509c 119,121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "96280b6fbeab1d7c36f9e255f494b8c3c3e02162",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "arn:aws:bedrock:us-west-2:456197019624:application-inference-profile/bumrjndkqzw8"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
