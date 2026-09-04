@@ -1,0 +1,48 @@
+src/payload-store.ts
+  s_9d988f2c5f030f::t_cb638888f9396f 1-38
+moka.js
+  s_9d988f2c5f030f::t_7fb53d37957795 200-229,351-354,386-387,621-633,640,659-660,668-669,678-679,686,699,732,735,769-770,772,777-1010,1018-1023,1053-1064,1088-1094,1118-1124,1143-1147,1161,1166-1170,1183-1184,1187-1194,1208-1209,1211-1219,1233,1239-1247
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_c4327ad9f8254f 257,260
+  s_9d988f2c5f030f::t_873b87a9500d2d 8-12
+  s_9d988f2c5f030f::t_a56144500a7d10 30-31
+  s_9d988f2c5f030f::t_b8f5208940b97c 248,250,252-256,258-259,261,263-294,302-306,321-323,329,389,398
+  s_9d988f2c5f030f::t_1ebb297f3ff308 164,166-168,171,174-175,177,179-185,191-197,199-202,204-209,222-234,237,244-246
+  s_9d988f2c5f030f::t_f565c447ef4e50 3
+  s_9d988f2c5f030f::t_71b17a7a913961 262
+  s_9d988f2c5f030f::t_c4a3dc8c34ac06 32-35
+  s_9d988f2c5f030f::t_ac6ae500008e8f 19-20
+src/moka-api.ts
+  s_9d988f2c5f030f::t_eb4c4f34bbfe2c 16-17,134-148,152,155,164,188,191,201,205
+tests/collector.test.ts
+  s_9d988f2c5f030f::t_f36bf40cc7c8d9 6,11-12,50,52
+src/http-client.ts
+  s_9d988f2c5f030f::t_271aa24cad35d1 82,87-89
+  s_9d988f2c5f030f::t_0d7342e430a261 1-81,83-86,90-143
+src/cookie-store.ts
+  s_9d988f2c5f030f::t_6885c26cd20f2b 167
+  s_9d988f2c5f030f::t_729f0e15c34c52 1-166,168-175
+src/collector.ts
+  s_9d988f2c5f030f::t_2954a74ed0d24d 7,13-14,18,21,29,42
+src/plugin.ts
+  s_9d988f2c5f030f::t_cec8695daaf6ee 9-12,22-28,68-83,107-113,138-144,164-168,183,188-192,207,210-217,233,235-243,258,264-276
+src/cdp.ts
+  s_9d988f2c5f030f::t_3cf70391899173 175-179
+  s_9d988f2c5f030f::t_d1fb7faa984d83 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "81480fbb7f115c4cf42b26d6f8064957bc7837d8",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "arn:aws:bedrock:us-west-2:456197019624:application-inference-profile/bumrjndkqzw8"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
