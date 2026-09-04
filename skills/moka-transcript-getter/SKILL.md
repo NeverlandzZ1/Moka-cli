@@ -96,6 +96,14 @@ opencli plugin install github:NeverlandzZ1/Moka-cli
 opencli plugin update moka-transcripts
 ```
 
+若更新后 `opencli moka export-transcripts --help` 里看不到 `--offline` 参数,说明 OpenCLI 缓存了旧命令注册,手动重装一次:
+
+```text
+opencli plugin uninstall moka-transcripts
+opencli plugin install github:NeverlandzZ1/Moka-cli
+opencli plugin list
+```
+
 安装 lark-cli：
 
 ```text
@@ -254,10 +262,10 @@ Cron：<根据用户执行时机生成>
 解析默认 JSON 的绝对路径，执行：
 
 ```text
-opencli moka export-transcripts --no-cdp --output "<绝对输出路径>" --overwrite -f json
+opencli moka export-transcripts --offline --output "<绝对输出路径>" --overwrite -f json
 ```
 
-`--no-cdp` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。
+`--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。
 
 若导出报错为"未登录 / 登录态失效"，中断本次采集，汇报"Moka 登录态失效，需要 HR 重新执行首次配置入口的登录步骤"，不要在定时任务里尝试自动打开 Chrome。
 

@@ -63,21 +63,26 @@ npm run build
 
 ## 4. 本地安装插件
 
-如果已经安装过 GitHub 版本或旧的本地版本，先卸载：
+修改源码后重新装到 OpenCLI 的完整流程(每次改完 `src/` 都要跑一遍):
 
 ```powershell
+# 1) 重新构建 moka.js(OpenCLI 只加载根目录 moka.js,不会跑 src/plugin.ts)
+npm run build
+
+# 2) 卸载旧版本(不管是 GitHub 装的还是本地装的,都用同一个名字卸载)
 opencli plugin uninstall moka-transcripts
-```
 
-从当前仓库安装：
+# 3) 从当前仓库重新安装(OpenCLI 不接受 "." 相对路径,必须传绝对路径或 file:// URL)
+#    Windows PowerShell:
+opencli plugin install "$PWD"
+#    或显式绝对路径,例如:
+#    opencli plugin install "D:\Users\jingboma\proj\bossHr\Moka-transcript-getter"
+#    或 file:// URL(注意三个斜杠):
+#    opencli plugin install "file:///D:/Users/jingboma/proj/bossHr/Moka-transcript-getter"
+#    macOS/Linux:
+#    opencli plugin install "$(pwd)"
 
-```powershell
-opencli plugin install .
-```
-
-验证：
-
-```powershell
+# 4) 验证命令都注册上了(新增 --offline 请在 export-transcripts --help 里确认)
 opencli plugin list -f json
 opencli moka login --help
 opencli moka status --help
@@ -88,13 +93,32 @@ opencli moka transcript --help
 opencli moka export-transcripts --help
 ```
 
-本地插件通过目录链接加载。修改源码并执行 `npm run build` 后，通常不需要重新安装插件。
+`opencli plugin install .` 采用目录链接方式,理论上后续修改源码执行 `npm run build` 覆盖 `moka.js` 后可直接生效,不用重新 install。但当以下任一情况发生时**必须**完整重装(重新走一遍上面 1~3 步):
 
-如果安装插件后 `tsc`、`vitest` 或 `esbuild` 消失，重新执行：
+- 修改了 `opencli-plugin.json`(命令元信息、参数、别名等)
+- 从 GitHub 版本切到本地开发版本,或反过来
+- 之前用 `--offline` 等新参数报"unknown argument"——说明 OpenCLI 缓存了旧命令注册
+
+如果安装插件后 `tsc`、`vitest` 或 `esbuild` 消失,重新执行:
 
 ```powershell
 npm install
 ```
+
+## 4.1 内部缓存文件
+
+插件运行后会在用户主目录写入以下 CLI 内部缓存(**这些文件由 CLI 内部读写,Agent 严禁 cat / 打印 / 上传**):
+
+```text
+~/.opencli/mokaData/moka-cookies.json                    Moka `.mokahr.com` 域下的 session cookie 缓存
+~/.opencli/mokaData/moka-interview-list-payload.json     interviewList 请求体模板
+~/.opencli/mokaData/transcript.json                      默认逐字稿输出路径(HR 数据)
+```
+
+- `moka-cookies.json` 在 `login`/`status`/`mode` 命令成功后自动刷新一次;`export-transcripts` 执行时 HTTP 响应的 `Set-Cookie` 会追加落盘,维持 session TTL。
+- `moka-interview-list-payload.json` 在首次带 CDP 的 `export-transcripts` 中通过 `discoverInterviewListPayload` 抓一次,后续 `--offline` 直接从此文件复用。
+
+**首次使用必须至少跑一次带 CDP 的流程**才能生成这两个缓存(通常就是 `opencli moka login` + 一次不带 `--offline` 的 `export-transcripts`),之后 HR 关闭 Chrome 也能靠这两个文件走纯 HTTP。
 
 ## 5. 登录与 Chrome 回归
 

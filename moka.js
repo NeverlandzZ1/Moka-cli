@@ -1016,10 +1016,10 @@ var commonPortArg = {
   help: "Chrome CDP \u7AEF\u53E3\uFF0C\u9ED8\u8BA4 9222"
 };
 var noCdpArg = {
-  name: "no-cdp",
+  name: "offline",
   type: "boolean",
   default: false,
-  help: "\u9ED8\u8BA4\u6A21\u5F0F\uFF1A\u8DF3\u8FC7 CDP Chrome\uFF0C\u76F4\u63A5\u7528\u672C\u5730\u7F13\u5B58\u7684\u767B\u5F55\u6001\u53D1 HTTP \u8BF7\u6C42"
+  help: "\u8DF3\u8FC7 CDP Chrome\uFF0C\u76F4\u63A5\u7528\u672C\u5730\u7F13\u5B58\u7684\u767B\u5F55\u6001\u53D1 HTTP \u8BF7\u6C42\uFF08\u65E0 Chrome \u573A\u666F\uFF09"
 };
 function intArg(value, fallback) {
   const parsed = Number(value ?? fallback);
@@ -1051,7 +1051,7 @@ function collectionOptions(kwargs) {
   };
 }
 async function withHttpClient(kwargs, fn) {
-  const noCdp = Boolean(kwargs["noCdp"] ?? kwargs["no-cdp"]);
+  const noCdp = Boolean(kwargs["offline"]);
   if (noCdp) {
     const client = createHttpClient();
     return fn(client, {});

@@ -20,10 +20,10 @@ const commonPortArg = {
 };
 
 const noCdpArg = {
-  name: 'no-cdp',
+  name: 'offline',
   type: 'boolean',
   default: false,
-  help: '默认模式：跳过 CDP Chrome，直接用本地缓存的登录态发 HTTP 请求',
+  help: '跳过 CDP Chrome，直接用本地缓存的登录态发 HTTP 请求（无 Chrome 场景）',
 };
 
 function intArg(value: unknown, fallback: number): number {
@@ -69,7 +69,7 @@ async function withHttpClient<T>(
   kwargs: Record<string, unknown>,
   fn: (client: HttpClient, ctx: { page?: IPage; bridge?: CDPBridge }) => Promise<T>,
 ): Promise<T> {
-  const noCdp = Boolean(kwargs['noCdp'] ?? kwargs['no-cdp']);
+  const noCdp = Boolean(kwargs['offline']);
   if (noCdp) {
     const client = createHttpClient();
     return fn(client, {});

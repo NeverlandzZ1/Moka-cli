@@ -145,13 +145,46 @@ opencli moka export-transcripts `
 
 开启后不会读取或合并旧文件。每次执行都只保存本次获取的记录；目标路径存在同名 JSON 时直接覆盖。未增加 `--overwrite` 时，仍保持默认的增量去重更新。
 
+## 无 CDP 采集(Chrome 已关闭时)
+
+只要曾经用 `opencli moka login` 成功登录并跑过一次 `export-transcripts`,后续采集就可以关闭 Chrome、加 `--offline` 跑纯 HTTP:
+
+```powershell
+opencli moka export-transcripts --offline `
+  --output "$HOME\Desktop\moka-transcripts.json" `
+  -f json
+```
+
+`--offline` 会读取 `~/.opencli/mokaData/moka-cookies.json` 里缓存的登录态直接发 HTTP,不再拉起 Chrome。适用于定时任务无人值守场景。
+
+只有全模式(需要切换校招/社招)必须带 CDP,不能加 `--offline`:
+
+```powershell
+opencli moka mode campus -f json
+opencli moka export-transcripts --output "..." --overwrite -f json
+opencli moka mode social -f json
+opencli moka export-transcripts --output "..." -f json
+```
+
+当 `--offline` 报"登录态已失效 / cookie 全部过期"时,重新执行一次 `opencli moka login` 让 CDP Chrome 完成登录,cookie 会自动刷新回磁盘。
+
 ## 更新插件
+
+从 GitHub 更新到最新版:
 
 ```text
 opencli plugin update moka-transcripts
 ```
 
-更新 OpenCLI：
+如果更新后 `--offline` 之类新参数报"unknown argument",说明 OpenCLI 缓存了旧命令,手动重装一次:
+
+```text
+opencli plugin uninstall moka-transcripts
+opencli plugin install github:NeverlandzZ1/Moka-cli
+opencli plugin list
+```
+
+更新 OpenCLI 本身:
 
 ```text
 npm install -g @jackwener/opencli@latest
