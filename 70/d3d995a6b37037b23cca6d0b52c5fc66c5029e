@@ -1,0 +1,39 @@
+skills/moka-transcript-getter/scripts/deduplicate-lark-base.mjs
+  s_9d988f2c5f030f::t_127d3686ed1929 384-392,396,399-400
+skills/moka-transcript-getter/references/lark-base-write.md
+  s_9d988f2c5f030f::t_39f3537aacfdc4 95,97-98
+  s_9d988f2c5f030f::t_62656182ad6915 110-111,119-126
+  s_9d988f2c5f030f::t_67d24abc6fed3d 158-160
+skills/moka-transcript-getter/references/interviewer-review-workflow.md
+  s_9d988f2c5f030f::t_6db1e247cb50eb 51
+  s_9d988f2c5f030f::t_c6747aff71ff4f 21
+  s_9d988f2c5f030f::t_c3863c30d1c8f8 94
+skills/moka-transcript-getter/scripts/sync-lark-base.mjs
+  s_9d988f2c5f030f::t_f8e3432d397d04 471,473,485,493,496-499
+  s_9d988f2c5f030f::t_af03f6bbe9c7d4 191-192,197
+  s_9d988f2c5f030f::t_3e8bd465c51d59 381-382,385-393,398-408,421-437
+skills/moka-transcript-getter/scripts/upload-html-to-drive.mjs
+  s_9d988f2c5f030f::t_af730ea28cd875 108,111
+  s_9d988f2c5f030f::t_ffaa0f40f9cdba 163-169,176
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_6c7f822b3bc168 445-566
+  s_9d988f2c5f030f::t_d0d94f909845e5 343
+  s_9d988f2c5f030f::t_a3738760702d52 371-382,386
+  s_9d988f2c5f030f::t_415e101769503a 398-399
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "70d3d995a6b37037b23cca6d0b52c5fc66c5029e",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "arn:aws:bedrock:us-west-2:456197019624:application-inference-profile/bumrjndkqzw8"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
