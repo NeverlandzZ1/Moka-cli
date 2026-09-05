@@ -86,6 +86,17 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 | 面试ID | `interviewId` | JSON number |
 | 轮次序号 | `round` | JSON number 或 null |
 | 转写类型 | `transcriptType` | JSON number 或 null |
+| 面试官复盘-开场与流程 | `reviewScores.openingFlow` | JSON number(0~5,0.5 精度)或 null |
+| 面试官复盘-提问质量 | `reviewScores.questionQuality` | JSON number(0~5,0.5 精度)或 null |
+| 面试官复盘-倾听 | `reviewScores.listening` | JSON number(0~5,0.5 精度)或 null |
+| 面试官复盘-追问深度 | `reviewScores.followUpDepth` | JSON number(0~5,0.5 精度)或 null |
+| 面试官复盘-尺度把控 | `reviewScores.scaleControl` | JSON number(0~5,0.5 精度)或 null |
+| 面试官复盘-反馈体验 | `reviewScores.feedbackExperience` | JSON number(0~5,0.5 精度)或 null |
+| 面试复盘报告 | `reviewReportUrl` | URL 超链接对象 `{ link, text: "点击查看" }`,非 `https?://` 开头传 null |
+
+> 六维复盘字段的评分锚点见 [`interviewer-review-workflow.md`](interviewer-review-workflow.md)。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与超链接列允许空,不影响其他列写入。
+> 飞书 Base 的 URL/超链接列在 `+record-batch-create` payload 里接收 `{ link, text }` 对象;`asOptionalUrl()` 会把合法 `https?://` URL 包成该对象,非法或空值直接返回 `null` 让脚本跳过此列。若真实写入报"URL 列类型不匹配",在 `asOptionalUrl` 里改成返回裸字符串重试即可(飞书两种格式接受度视 field 类型而定)。
+> 「面试官(人员)」列与「处理状态」列不在本流水线的写入范围内——用户明确不管,飞书 Base 中允许为空。
 
 ### 输出
 

@@ -38,7 +38,13 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
+- 飞书云盘上传脚本：`scripts/upload-html-to-drive.mjs`（把面试复盘 HTML 报告上传到当前用户云盘根目录，返回可访问 URL）
+- 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
+- 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`）
+- 模板 Logo：`assets/logo.png`
 - 脚本契约：`references/lark-base-write.md`
+- 评分与报告执行契约：`references/interviewer-review-workflow.md`
+- 评分锚点与话术：`references/evaluation-guide.md`、`references/interview-toolkit.md`、`references/red-lines.md`
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
 
@@ -257,7 +263,7 @@ Cron：<根据用户执行时机生成>
 
 该入口面向无人值守运行，只抓取当前 Moka 账号默认模式下的转写数据。**不检测 CDP、不检查 Moka 登录态、不检查 lark-cli 授权**——首次配置入口已经确保这些落地了，进入本入口时默认它们仍然有效。异常时（导出报未登录、写入报授权失败等）中断并汇报，让 HR 回到首次配置入口处理。
 
-### 1. 覆盖导出后批量写入飞书
+### 1. 覆盖导出今日全量 JSON
 
 解析默认 JSON 的绝对路径，执行：
 
@@ -265,35 +271,13 @@ Cron：<根据用户执行时机生成>
 opencli moka export-transcripts --offline --output "<绝对输出路径>" --overwrite -f json
 ```
 
-`--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。
+`--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。`--overwrite` 覆盖旧文件，得到今天默认模式的全量 JSON。
 
 若导出报错为"未登录 / 登录态失效"，中断本次采集，汇报"Moka 登录态失效，需要 HR 重新执行首次配置入口的登录步骤"，不要在定时任务里尝试自动打开 Chrome。
 
-导出成功后，解析当前 Skill 目录和 JSON 绝对路径，执行：
+### 2. 共用后处理
 
-```text
-node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
-```
-
-若 `lark-cli` 不在当前 PATH，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，加 `--lark-cli "<路径>"` 参数。不要修改用户的全局 PATH。
-
-只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算写入成功。sync 脚本不查飞书是否已有记录，直接批量写入，重复交给下一步去重清理。
-
-若写入报错为 lark-cli 未授权或缺 scope，中断本次采集并汇报"飞书授权失效，需要 HR 重新执行首次配置入口的 lark-cli 授权步骤"。
-
-### 2. 飞书去重清理
-
-无论是否有重复都执行：
-
-```text
-node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
-```
-
-去重与删除策略同全模式入口第 4 步，见下方全模式入口内的说明。
-
-### 3. 汇总本次结果
-
-规则同全模式入口第 5 步的姓名脱敏规则和汇报字段，但**只汇报默认模式一份导出结果**，不区分校招/社招。
+导出成功后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + 云盘上传 + 单次 sync + 去重）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
 
 ## 定时采集入口 · 全模式
 
@@ -313,13 +297,13 @@ opencli moka status -f json
 
 lark-cli 授权失效的场景不在本步骤主动预检，交给 sync/dedup 脚本自然报错后中断。
 
-**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync 和 dedup 脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
+**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup、云盘上传脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs` 和 `scripts/deduplicate-lark-base.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create` 或 `+record-batch-update` 写面试转写表。维护脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/upload-html-to-drive.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，HTML 上传由 upload 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表，也禁止直接调用 `lark-cli drive +upload`。维护脚本时才读取 `references/lark-base-write.md`。
 
-### 2. 校招：覆盖导出后批量写入飞书
+### 2. 校招：覆盖导出
 
-解析默认 JSON 的绝对路径，依次执行：
+依次执行：
 
 ```text
 opencli moka mode campus -f json
@@ -328,82 +312,121 @@ opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f j
 
 `opencli moka mode campus` 通过 CDP 执行 DOM 点击切换到校招模式——这是本入口需要 Chrome 常驻的唯一原因。若该命令报 CDP 断开或 DOM 元素找不到，中断并汇报。
 
-确认导出成功后，执行：
+`--overwrite` 保证 JSON 只包含本次校招结果，覆盖昨天遗留内容。**本步骤不写飞书**——校招 JSON 先落在 `<绝对输出路径>` 中,等社招合并后再一次性同步。
+
+### 3. 社招：合并导出到同一 JSON
+
+仅在校招导出成功后执行：
+
+```text
+opencli moka mode social -f json
+opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
+```
+
+**注意此处不传 `--overwrite`**——`export-transcripts` 默认行为是增量合并：以 `applicationId + interviewId` 为联合键，新记录追加,重复联合键覆盖旧值,校招 records 保留。合并完成后 `<绝对输出路径>` 里 records 数 = 校招条数 + 社招条数（去重后）。
+
+若社招导出失败，保留当前 JSON，报告失败,便于人工排查;不得声称全流程成功。
+
+### 4. 共用后处理
+
+校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + 云盘上传 + 单次 sync + 去重）。汇总时分别标注校招/社招导出条数、合并后总数。
+
+## 共用后处理
+
+两个定时入口在拿到「今天全量 JSON」后，共享以下四段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**，避免旧全模式 sync 两次的问题。
+
+### 后处理-1. 逐条评分并生成 HTML 报告
+
+严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
+
+- 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
+- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(文件名用**脱敏后**的候选人 + `interviewId`) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/复盘报告-<脱敏候选人>-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。
+- 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
+- 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
+
+**必须原样引用** `interviewer-review` 的脚本(transcript_stats.py)与模板(report-template.html);**严禁**自行改写打分算法或 HTML 模板结构。
+
+### 后处理-2. 上传报告到飞书云盘,回填 URL
+
+对每条**已生成 HTML** 的 record 执行:
+
+```text
+node "<Skill目录>/scripts/upload-html-to-drive.mjs" --file "<HTML绝对路径>"
+```
+
+若 `lark-cli` 不在默认 PATH,追加 `--lark-cli "<路径>"`。
+
+只有脚本退出码 0 且 stdout JSON `ok == true` 时,把 `url` 写入 `record.reviewReportUrl`。失败: 记 `record.reviewError = "upload failed: <原因>"`,`reviewReportUrl` 不写,该 record 的 HTML 本地保留供人工排查,继续下一条。
+
+所有 record 处理完成后,把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`(顶层 CollectionResult 的 `generatedAt` / `source` / `errors` / `stats` 保留原值)。
+
+### 后处理-3. 单次批量写入飞书
 
 ```text
 node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 ```
 
-只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算校招落库成功。sync 脚本不查飞书是否已有记录，直接批量写入；如果写入到一半中断导致重复，由最后的去重步骤统一清理。
+若 `lark-cli` 不在 PATH,追加 `--lark-cli "<路径>"`。
 
-### 3. 社招：再次覆盖后批量写入飞书
+只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算写入成功。sync 脚本会自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值,以及「面试复盘报告」URL 列;评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「面试官(人员)」和「处理状态」列本流水线不管。
 
-仅在校招已成功写入飞书后执行：
+sync 脚本不查飞书是否已有记录,直接批量写入,重复交给下一步去重清理。若写入报错为 lark-cli 未授权或缺 scope,中断本次采集并汇报"飞书授权失效,需要 HR 重新执行首次配置入口的 lark-cli 授权步骤"。
 
-```text
-opencli moka mode social -f json
-opencli moka export-transcripts --output "<同一绝对输出路径>" --overwrite -f json
-```
+### 后处理-4. 飞书去重清理
 
-此时 JSON 只包含本次社招结果，校招 JSON 被覆盖是预期行为，因为校招数据已经进入飞书。随后再次执行同一个 `sync-lark-base.mjs --input "<绝对输出路径>"`。
-
-若社招写入失败，保留当前社招 JSON，报告失败，便于人工重试；不得声称全流程成功。
-
-### 4. 飞书去重清理（固定收尾步骤）
-
-社招写入完成后，无论是否有重复都执行去重清理：
+无论是否有重复都执行:
 
 ```text
 node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 ```
 
-去重规则：
+去重规则:
 
-- 面试转写表：按「面试ID + 申请ID」联合键去重，保留每组第一条，删除其余
-- 面试ID 或申请ID 为 null 的空行跳过，不参与去重
+- 面试转写表: 按「面试ID + 申请ID」联合键去重,保留每组第一条,删除其余。
+- 面试ID 或申请ID 为 null 的空行跳过,不参与去重。
 
-删除策略（关键设计）：
+删除策略(关键设计):
 
-- **逐条删除**：脚本逐条调用 `lark-cli base +record-delete --record-id <id> --yes`，不使用批量删除接口
-- **不用 batch delete 的原因**：飞书的 batch delete 命令在实测中会静默失败（报错 `batch delete N records failed`），即使同一用户在同一张表上 `batch-create` 完全成功。这不是权限问题，是批量删除接口本身的限制或不稳定
-- **并发控制**：默认 3 并发（可配 `--concurrency`），保守值防止飞书 API 限流
-- **独立反馈**：每条删除都有独立的成功/失败反馈，某条失败不影响其他条目
+- **逐条删除**: 脚本逐条调用 `lark-cli base +record-delete --record-id <id> --yes`,不使用批量删除接口。
+- **不用 batch delete 的原因**: 飞书 batch delete 命令在实测中会静默失败(报错 `batch delete N records failed`),即使同一用户在同一张表上 `batch-create` 完全成功。这不是权限问题,是批量删除接口本身的限制或不稳定。
+- **并发控制**: 默认 3 并发(可配 `--concurrency`),保守值防止飞书 API 限流。
+- **独立反馈**: 每条删除都有独立的成功/失败反馈,某条失败不影响其他条目。
 
-只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算去重成功。输出中 `deleted` 记录成功删除数，`failed` 记录失败数，`errors` 含失败详情。
+只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算去重成功。输出中 `deleted` 记录成功删除数,`failed` 记录失败数,`errors` 含失败详情。
 
-去重失败不阻塞本次采集结果汇报，但在汇报中标注"去重未完成，需手动处理"并附上 `failed` 和 `errors` 信息。大多数失败是飞书 API 限流导致的暂时性问题，稍后重跑脚本即可恢复。
+去重失败不阻塞本次采集结果汇报,但在汇报中标注"去重未完成,需手动处理"并附上 `failed` 和 `errors` 信息。大多数失败是飞书 API 限流导致的暂时性问题,稍后重跑脚本即可恢复。
 
 脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件。
 
-### 5. 汇总本次结果
+### 后处理-5. 汇总本次结果
 
-分别记录校招和社招导出结果、飞书写入结果及去重结果。不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
+不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
 
-每条本次处理的记录只汇报：
+每条本次处理的记录只汇报:
 
 ```text
-候选人：<脱敏后的 candidateName>｜面试官：<脱敏后的 interviewerNames，以顿号连接；缺失时写"未记录">｜岗位：<jobTitle>
+候选人:<脱敏后的 candidateName>｜面试官:<脱敏后的 interviewerNames,以顿号连接;缺失时写"未记录">｜岗位:<jobTitle>｜复盘:<有|无|失败>
 ```
 
-姓名脱敏规则：
+姓名脱敏规则:
 
-- 中文姓名保留姓氏，其余字符替换为 `*`：`张三` → `张*`，`王小明` → `王**`；单字姓名显示 `*`。
-- 英文姓名的每个单词只保留首字母，其余字符替换为 `*`：`Alice Smith` → `A**** S****`。
+- 中文姓名保留姓氏,其余字符替换为 `*`: `张三` → `张*`,`王小明` → `王**`;单字姓名显示 `*`。
+- 英文姓名的每个单词只保留首字母,其余字符替换为 `*`: `Alice Smith` → `A**** S****`。
 - 中英文组合姓名分别按上述规则处理。
-- 真实姓名只允许写入本 Skill 固定配置且用户已授权的飞书 Base。不得在聊天回复、定时任务摘要、错误信息、调试日志或临时请求文件名中输出真实姓名。
+- 真实姓名只允许写入本 Skill 固定配置且用户已授权的飞书 Base。不得在聊天回复、定时任务摘要、错误信息、调试日志、报告文件名或临时请求文件名中输出真实姓名。
 
-最后汇报：
+最后汇报:
 
-- 校招、社招分别是否导出成功、是否写入飞书成功（默认模式入口只汇报默认模式一份）
-- 本次输入去重后的记录数
+- 校招、社招分别是否导出成功、合并后总条数(默认模式入口只汇报默认模式一份)
+- 本次评分成功/失败/跳过的记录数,HTML 云盘上传成功/失败数
 - 新增面试记录数、batch-create 是否降级
-- 去重结果：面试转写表删除数/失败数
+- 去重结果: 面试转写表删除数/失败数
 - 上述每条简要信息
 - JSON 的绝对保存路径
 - 飞书 Base 链接
-- 若有错误，列出阶段和简短错误原因
+- 若有错误,列出阶段和简短错误原因
 
-不要汇报逐字稿正文。没有今日记录时明确说"今日没有可导出的面试记录"，仍报告采集状态、JSON 路径和 Base 链接。
+不要汇报逐字稿正文、复盘评分细节或红线原文。没有今日记录时明确说"今日没有可导出的面试记录",仍报告采集状态、JSON 路径和 Base 链接。
 
 ## 安全与边界
 

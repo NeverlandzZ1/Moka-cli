@@ -188,6 +188,13 @@ function asOptionalNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function asOptionalUrl(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value).trim();
+  if (!/^https?:\/\//i.test(text)) return null;
+  return { link: text, text: "点击查看" };
+}
+
 function formatUtcDateTime(value) {
   if (value === null || value === undefined || value === "") return null;
   const date = new Date(Number(value));
@@ -201,6 +208,7 @@ function stringifyQuestionAnalysis(value) {
 }
 
 function transcriptFields(record) {
+  const reviewScores = record.reviewScores || {};
   return {
     "候选人姓名": asText(record.candidateName),
     "岗位名称": asText(record.jobTitle),
@@ -218,6 +226,13 @@ function transcriptFields(record) {
     "面试ID": record.interviewId,
     "轮次序号": asOptionalNumber(record.round),
     "转写类型": asOptionalNumber(record.transcriptType),
+    "面试官复盘-开场与流程": asOptionalNumber(reviewScores.openingFlow),
+    "面试官复盘-提问质量": asOptionalNumber(reviewScores.questionQuality),
+    "面试官复盘-倾听": asOptionalNumber(reviewScores.listening),
+    "面试官复盘-追问深度": asOptionalNumber(reviewScores.followUpDepth),
+    "面试官复盘-尺度把控": asOptionalNumber(reviewScores.scaleControl),
+    "面试官复盘-反馈体验": asOptionalNumber(reviewScores.feedbackExperience),
+    "面试复盘报告": asOptionalUrl(record.reviewReportUrl),
   };
 }
 
