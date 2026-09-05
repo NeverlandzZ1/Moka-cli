@@ -381,13 +381,23 @@ async function runConcurrent(tasks, concurrency = 3) {
 
 /**
  * 面试转写表按「面试ID + 申请ID」联合键去重
+ *
+ * 保留策略: **保留 record_id 倒序第一条**(即最后写入的、更新鲜的记录)。
+ * 早期版本按顺序保留"第一条"→ 结果保留了最早的旧记录(无评分/无 URL),
+ * 反而删掉了最新一批带评分和 HTML URL 的记录。实测切换为倒序保留后,
+ * 每次 sync 写入的最新记录会稳定保留,旧的空壳记录被清掉。
+ *
+ * 未来若飞书 record-list 顺序不能视为写入顺序,应改用 `created_time` 字段排序,
+ * 但当前 lark-cli +record-list 默认按 created_time 升序返回,倒序取即可。
+ *
  * @returns { keepBy: Map<key, recordId>, toDelete: string[] }
  */
 function deduplicateTranscripts(records, recordIds) {
-  const keepBy = new Map(); // businessKey → recordId (保留的第一条)
+  const keepBy = new Map(); // businessKey → recordId (保留的第一条,倒序遍历下即最新一条)
   const toDelete = [];
 
-  for (let i = 0; i < records.length; i++) {
+  // 倒序遍历:先看到的就是最新的,记入 keepBy;之后再看到同 key 的就是旧的,删掉。
+  for (let i = records.length - 1; i >= 0; i--) {
     const interviewId = records[i][0]; // 面试ID
     const applicationId = records[i][1]; // 申请ID
     const recordId = recordIds[i];

@@ -105,9 +105,10 @@ function tryParseJson(text) {
   return null;
 }
 
-function runLarkCli(command, args, timeoutMs) {
+function runLarkCli(command, args, timeoutMs, cwd) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
+      cwd: cwd || process.cwd(),
       env: {
         ...process.env,
         LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
@@ -159,15 +160,20 @@ async function upload(options) {
   const larkCli = resolveLarkCli(options);
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
 
-  const args = ["drive", "+upload", "--file", absPath, "--format", "json"];
-  const result = await runLarkCli(larkCli, args, timeoutMs);
+  // lark-cli drive +upload 校验 "must be a relative path within cwd":
+  // 直接传绝对路径会被拒。改为切到 HTML 所在目录,只传文件名。
+  const uploadCwd = path.dirname(absPath);
+  const relFile = path.basename(absPath);
+
+  const args = ["drive", "+upload", "--file", relFile, "--format", "json"];
+  const result = await runLarkCli(larkCli, args, timeoutMs, uploadCwd);
   const envelope = tryParseJson(result.stdout);
 
   if (result.timedOut) {
     throw new UploadError(`lark-cli drive +upload timed out after ${timeoutMs}ms`);
   }
   if (result.error || result.code !== 0 || !envelope?.ok) {
-    const msg = envelope?.error?.message || result.stderr?.slice(0, 500) || "lark-cli drive +upload failed";
+    const msg = envelope?.error?.message || envelope?.msg || result.stderr?.slice(0, 500) || "lark-cli drive +upload failed";
     throw new UploadError(msg);
   }
   const fileToken = extractFileToken(envelope);

@@ -340,7 +340,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
-- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(文件名用**脱敏后**的候选人 + `interviewId`) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/复盘报告-<脱敏候选人>-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。
+- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,不带候选人姓名) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`(**纯 ASCII 文件名**,姓名只放 HTML 内容里、且脱敏),替换全部 18 个 `{{TOKEN}}`(替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。
 - 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
 - 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
 
@@ -368,9 +368,22 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 
 若 `lark-cli` 不在 PATH,追加 `--lark-cli "<路径>"`。
 
-只有脚本退出码为 0 且输出 JSON 的 `ok == true` 才算写入成功。sync 脚本会自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值,以及「面试复盘报告」URL 列;评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「面试官(人员)」和「处理状态」列本流水线不管。
+**成功判定**(缺一不可):
+
+1. 退出码为 0
+2. stdout JSON 的 `ok === true`
+3. stdout JSON 的 `created === deduplicatedRecords`(所有去重后的 record 都写入了)
+4. stdout JSON 的 `failed === 0`
+
+**任何一条不满足**就必须在汇报里写"sync 未完全成功",并附上 `stats.errors` 或 stdout 中的失败详情(不含逐字稿正文)。**不要**因为 ok:true 就直接判定通过——旧脚本在有失败时会误报 ok:true,新脚本已收紧,但若字段缺失说明脚本还没更新。
+
+sync 脚本自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值,以及「面试复盘报告」文本 URL 列;评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「面试官(人员)」和「处理状态」列本流水线不管。
+
+「面试复盘报告」列**必须是文本或超链接类型**——若飞书 Base 上是附件类型,OpenAPI 不允许写附件单元格,整条 record 会被拒(实测走这个坑)。当前 Base 已经由用户手动改成文本列,直接写字符串 URL。
 
 sync 脚本不查飞书是否已有记录,直接批量写入,重复交给下一步去重清理。若写入报错为 lark-cli 未授权或缺 scope,中断本次采集并汇报"飞书授权失效,需要 HR 重新执行首次配置入口的 lark-cli 授权步骤"。
+
+**失败时的正确反应**:在汇报里如实说明失败原因,不重跑整个流水线,不删除任何飞书记录,不重装工具——交给 HR 判断。
 
 ### 后处理-4. 飞书去重清理
 
@@ -382,7 +395,8 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 去重规则:
 
-- 面试转写表: 按「面试ID + 申请ID」联合键去重,保留每组第一条,删除其余。
+- 面试转写表: 按「面试ID + 申请ID」联合键去重,**保留每组最新一条**(record_id 倒序遍历下先命中的一条),删除其余。
+- **为什么保留最新**: 每天 sync 会追加当天带评分和 HTML URL 的新记录,如果保留最旧,反而会删掉刚生成的评分把无评分的旧记录留下。
 - 面试ID 或申请ID 为 null 的空行跳过,不参与去重。
 
 删除策略(关键设计):
@@ -428,7 +442,128 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 不要汇报逐字稿正文、复盘评分细节或红线原文。没有今日记录时明确说"今日没有可导出的面试记录",仍报告采集状态、JSON 路径和 Base 链接。
 
-## 安全与边界
+## 成功路径 Runbook(定时任务作业模板)
+
+以下是**一次成功的定时任务**从头到尾的骨架命令。**变更任何一步之前先对着这里核对**——真实定时任务的问题基本都是偏离了这套骨架。
+
+**共同前置**(每次入口第一件事就做,不能省):
+
+1. 解析并保存 Skill 绝对路径:所有后续命令用 `<Skill目录>/scripts/xxx.mjs`,**不用**相对路径 `scripts/xxx.mjs`(宿主 shell 的 cwd 不在 skill 目录)。
+2. 解析 lark-cli 绝对路径:Windows `where lark-cli`,macOS/Linux `which lark-cli`。所有 `.mjs` 都追加 `--lark-cli "<路径>"`。
+3. Windows 上执行 Node/Python 前设 `chcp 65001` 并注入 `PYTHONIOENCODING=utf-8`。禁止在 PowerShell 里用 `&&` 串命令,一行一条。
+4. **禁止 Agent 直接调 `lark-cli` 写入/上传/删除**。只允许调 skill 自带的 `.mjs` 包装脚本——它们已经内嵌了字段类型兼容、@file 相对路径、失败降级、脱敏日志。
+
+**默认模式骨架**:
+
+```text
+# 1. 覆盖导出
+opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json
+
+# 2. 遍历 records[] 评分 + 生成报告 + 上传云盘 + 回填 JSON
+#    (Agent 循环,严格按 references/interviewer-review-workflow.md)
+node "<Skill目录>/scripts/upload-html-to-drive.mjs" --file "<html绝对路径>" --lark-cli "<lark-cli 绝对路径>"
+
+# 3. 单次批量写入(整个流水线只调一次)
+node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<PATH>" --lark-cli "<lark-cli 绝对路径>"
+
+# 4. 去重(保留最新)
+node "<Skill目录>/scripts/deduplicate-lark-base.mjs" --lark-cli "<lark-cli 绝对路径>"
+```
+
+**全模式骨架**:
+
+```text
+# 1. CDP 自检
+opencli moka status -f json
+
+# 2. 校招覆盖(不 sync)
+opencli moka mode campus -f json
+opencli moka export-transcripts --output "<PATH>" --overwrite -f json
+
+# 3. 社招合并(不加 --overwrite,不 sync)
+opencli moka mode social -f json
+opencli moka export-transcripts --output "<PATH>" -f json
+
+# 4~6 = 默认模式 2~4
+```
+
+**成功判定**(每一步必须核对,不能只看"命令有输出"):
+
+| 步骤 | 判定 |
+|---|---|
+| export-transcripts | 退出码 0 且 JSON 顶层 `ok:true` 且 `records.length > 0`(为 0 时汇报"今日无记录",不算失败) |
+| upload-html-to-drive.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `url` 以 `https://` 开头 |
+| sync-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true` **并且** `created === deduplicatedRecords` **并且** `failed === 0`。**旧版本 sync 会在有失败时误报 ok:true,新版本已收紧;若字段缺失说明脚本没更新。** |
+| deduplicate-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true`(失败不阻塞汇报,但要在汇总里带上 `failed`/`errors`) |
+
+## 错误速查表(先查表,不要瞎猜)
+
+以下是定时任务实跑踩过的坑,按现象直接对到根因和处置。**看到就照单执行,不要临场发挥。**
+
+### 数据读取阶段
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| `grep "candidateName" transcript.json` 返 0 行,但文件明明有数据 | Grep 工具跨大 JSON 命中窗口有限 | 换 `node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync(...))))"` 或 `python -c "import json; print(...)"`,不要靠 grep 探大 JSON 结构 |
+| `Read` 大 JSON 被截断,后半段拿不到 | 单次 Read 有行数上限 | 不要用 Read 全量看大 JSON;结构化查询用 `node -e` / `python -c`,只查关键字段 |
+
+### 脚本执行阶段
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| `python transcript_stats.py` 报 `UnicodeDecodeError` / stdout 空 | Windows 默认 GBK,脚本 stdout 是 GBK,Python 强解 UTF-8 崩 | 执行前 `chcp 65001`;或在 spawn 时设 `PYTHONIOENCODING=utf-8`。**skill 内的 .mjs 已经处理**,只有 Agent 手动调 Python 才踩 |
+| `python -c "f'{...}'"` 单行崩 SyntaxError | PowerShell 引号转义与 Python f-string 冲突 | **禁止 `python -c` 单行运行任何含 f-string 或多语句的代码**;写到 `.py` 临时文件再跑 |
+| `node "scripts/xxx.mjs"` 找不到脚本 | 宿主 execScript 的 cwd 不在 skill 目录 | **一律用绝对路径** `node "<Skill目录>/scripts/xxx.mjs"`。共同前置第 1 步就是干这个的 |
+| 手误 `D:` 打成 `E:` | 无 | 每一次 execScript 之前肉眼核对盘符 |
+
+### 云盘上传阶段
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| `lark-cli drive +upload` 报 `unsafe file path: must be a relative path within the current directory` | 直接把绝对路径喂给了 lark-cli | **只调 `upload-html-to-drive.mjs`,不要自己拼 `lark-cli drive +upload`**——脚本已在内部 chdir 到 HTML 目录并传相对文件名 |
+| 报告文件名带 `**` 或中文,`Errno 22 Invalid argument` | Windows 文件名禁用 `**`,中文在部分 Node/Python 版本上编码不稳 | 报告/临时文件名**只用 ASCII**:`review-<interviewId>.html`、`transcript-<interviewId>.txt`。脱敏候选人姓名只放在**HTML 内容里**,不要进文件名 |
+| upload 成功但拿不到 URL | lark-cli 输出格式变了,`file_token` 不在预期位置 | 查 `upload-html-to-drive.mjs` 的 `extractFileToken()`,追加新的取值路径;不要绕开脚本 |
+
+### Base 写入阶段(最容易掉链子)
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| `sync-lark-base.mjs` 输出 `ok:true` 但 `created === 0` 或 `failed > 0` | 旧脚本 ok 语义太宽;新脚本已收紧为 "created==deduplicatedRecords && failed==0" | **必须核对 `created`/`failed`/`deduplicatedRecords` 三个字段**,不能只看 ok。有 failed 直接把 `errors` 抄进汇报,不重跑,交给 HR |
+| 每条 record `operation:"failed"` | 通常是某个列类型不匹配 | 打开 stdout 中的 `errors[].message`;若报"字段类型不匹配",跑 `lark-cli base +field-list --base-token <a> --table-id <t> --as user -f json` 查实际类型对比 `references/lark-base-write.md` |
+| 「面试复盘报告」列写入报错 | 该列曾是附件类型(OpenAPI 不能写附件) | 用户已手动改为**文本列**。若飞书 Base 上又改回附件,skill 会再度失败:去 Base 把该列改回**文本或超链接**类型,不要改 sync 脚本 |
+| `+record-batch-create` 全部失败降级 upsert 仍失败 | 一般是同一个字段类型不匹配问题 | 同上,先 `+field-list` 诊断,不要重跑 |
+| `+record-update` / `+record-batch-update` 命令不存在 | lark-cli 里根本没这个动词 | 只用脚本封装好的 `+record-batch-create` / `+record-upsert` / `+record-delete`。**动手前先 `lark-cli base --help` 查一下动词是否存在** |
+| dedup 删除了带评分的新记录,留下无评分旧记录 | 旧脚本按顺序保留"第一条"(=最旧) | 新脚本已改成**倒序保留最新一条**。若又踩到,确认 dedup 脚本里 `deduplicateTranscripts` 是倒序遍历 |
+| dedup 输出 `ok:true` 但 sync 后飞书上仍有重复 | 飞书 record-list 的顺序不稳定 | 目前依赖 `record-list` 默认顺序,若飞书改了默认顺序需要改成显式按 `created_time` 排序——追加 `--sort-by created_time` 或类似参数 |
+
+### 工具选择
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| `lark-cli.cmd` 直接调,中文字段名走 `\uXXXX` 转义后 field_not_found | Windows 命令行 UTF-8 传参编码链条太脆 | **禁止 Agent 直接调 lark-cli 写数据**。所有写入/删除/上传统一走 skill 提供的 `.mjs` 脚本;它们已经封好了编码、@file、字段兼容 |
+| Python `subprocess.run(lark_cli, encoding='utf-8')` stdout 是空的 | lark-cli 输出是 GBK,Python 强解 UTF-8 报错并把 stdout 吞了 | 别自己起 Python 调 lark-cli;直接调本 skill 的 `.mjs`(内部用 `spawn` + `setEncoding('utf8')` 已经处理) |
+
+### 汇报
+
+| 现象 | 处置 |
+|---|---|
+| 汇总时说"sync 全部成功",但实际每条都 failed | **必须**看 `created`/`failed`/`deduplicatedRecords` 三个字段。 `ok:true` 是必要非充分条件 |
+
+## Agent 自查清单(每次入口开跑前默念)
+
+进入任一定时入口前,**必须**在心里过一遍下面这份清单;违背任何一条基本都会踩坑:
+
+- [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。
+- [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
+- [ ] **不直接调 `lark-cli`** 写入、上传、删除——只调 skill 提供的 3 个 `.mjs`。
+- [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
+- [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),脱敏姓名放在 HTML 内容里而非文件名。
+- [ ] 大 JSON 结构探查用 `node -e` / `python -c`,不用 `grep` / `Read` 硬碰。
+- [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
+- [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
+- [ ] 出现任何写入失败**不重跑整个流水线**——把 `errors` 附到汇总,让 HR 决定。
+
+
 
 - 只访问当前登录账号有权查看的数据。
 - 不使用 mitmproxy 完成日常采集；不要求用户提供抓包或凭证。

@@ -188,11 +188,13 @@ function asOptionalNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+// 「面试复盘报告」列在飞书 Base 里是文本列（用户手动改自附件),直接写入 URL 字符串即可。
+// 保留 https?:// 校验避免异常值污染;非 URL 返回 null,让飞书列保持空。
 function asOptionalUrl(value) {
   if (value === null || value === undefined || value === "") return null;
   const text = String(value).trim();
   if (!/^https?:\/\//i.test(text)) return null;
-  return { link: text, text: "点击查看" };
+  return text;
 }
 
 function formatUtcDateTime(value) {
@@ -376,13 +378,34 @@ async function batchCreateTranscripts(config, records, summary) {
         results.push({
           record: batch[j].record,
           recordId,
-          operation: "created",
+          operation: recordId ? "created" : "failed",
+          error: recordId ? null : "batch-create returned empty record_id",
         });
         if (recordId) summary.created += 1;
+        else {
+          summary.failed += 1;
+          summary.errors.push({
+            interviewId: batch[j].record.interviewId,
+            applicationId: batch[j].record.applicationId,
+            phase: "batch-create",
+            message: "empty record_id",
+          });
+        }
       }
     } else {
       // batch-create 失败，降级为逐条创建
       summary.batchCreateFallback = true;
+      // 记下 batch 层错误摘要,便于排查(不含逐字稿正文)
+      const batchErrorMsg = envelope?.error?.message
+        || envelope?.msg
+        || result.stderr?.slice(0, 300)
+        || `batch-create failed (code=${result.code})`;
+      summary.errors.push({
+        phase: "batch-create",
+        batchIndex: Math.floor(i / batchSize),
+        batchSize: batch.length,
+        message: batchErrorMsg,
+      });
       for (const item of batch) {
         const singlePayloadJson = JSON.stringify(item.fields);
         const singleArgs = [
@@ -395,8 +418,23 @@ async function batchCreateTranscripts(config, records, summary) {
         const singleResult = await runLarkCli(larkCli, singleArgs, timeoutMs, singlePayloadJson);
         const singleEnvelope = tryParseJson(singleResult.stdout);
         const recordId = singleEnvelope?.data?.record?.record_id || null;
-        results.push({ record: item.record, recordId, operation: recordId ? "created" : "failed" });
-        if (recordId) summary.created += 1;
+        results.push({
+          record: item.record,
+          recordId,
+          operation: recordId ? "created" : "failed",
+          error: recordId ? null : (singleEnvelope?.error?.message || singleEnvelope?.msg || singleResult.stderr?.slice(0, 200) || `upsert failed (code=${singleResult.code})`),
+        });
+        if (recordId) {
+          summary.created += 1;
+        } else {
+          summary.failed += 1;
+          summary.errors.push({
+            interviewId: item.record.interviewId,
+            applicationId: item.record.applicationId,
+            phase: "upsert-fallback",
+            message: singleEnvelope?.error?.message || singleEnvelope?.msg || singleResult.stderr?.slice(0, 300) || `upsert failed (code=${singleResult.code})`,
+          });
+        }
       }
     }
   }
@@ -430,7 +468,9 @@ export async function sync(options) {
     deduplicatedRecords: deduped.records.length,
     inputDuplicatesDropped: deduped.dropped,
     created: 0,
+    failed: 0,
     batchCreateFallback: false,
+    errors: [],
     records: [],
   };
 
@@ -442,7 +482,7 @@ export async function sync(options) {
   const transcriptResults = await batchCreateTranscripts(config, deduped.records, summary);
 
   // 组装脱敏摘要
-  summary.records = transcriptResults.map(({ record, recordId, operation }) => ({
+  summary.records = transcriptResults.map(({ record, recordId, operation, error }) => ({
     applicationId: record.applicationId,
     interviewId: record.interviewId,
     candidateName: maskName(record.candidateName),
@@ -450,7 +490,13 @@ export async function sync(options) {
     jobTitle: asText(record.jobTitle),
     operation,
     recordId,
+    error: error || undefined,
   }));
+
+  // ok 反映真实战果:有任何一条 record failed,或 created != deduplicatedRecords,都视为失败。
+  if (summary.failed > 0 || summary.created !== summary.deduplicatedRecords) {
+    summary.ok = false;
+  }
 
   return summary;
 }

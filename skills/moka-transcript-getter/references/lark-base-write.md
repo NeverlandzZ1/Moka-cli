@@ -92,10 +92,10 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 | 面试官复盘-追问深度 | `reviewScores.followUpDepth` | JSON number(0~5,0.5 精度)或 null |
 | 面试官复盘-尺度把控 | `reviewScores.scaleControl` | JSON number(0~5,0.5 精度)或 null |
 | 面试官复盘-反馈体验 | `reviewScores.feedbackExperience` | JSON number(0~5,0.5 精度)或 null |
-| 面试复盘报告 | `reviewReportUrl` | URL 超链接对象 `{ link, text: "点击查看" }`,非 `https?://` 开头传 null |
+| 面试复盘报告 | `reviewReportUrl` | 文本 URL 字符串,非 `https?://` 开头传 null |
 
-> 六维复盘字段的评分锚点见 [`interviewer-review-workflow.md`](interviewer-review-workflow.md)。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与超链接列允许空,不影响其他列写入。
-> 飞书 Base 的 URL/超链接列在 `+record-batch-create` payload 里接收 `{ link, text }` 对象;`asOptionalUrl()` 会把合法 `https?://` URL 包成该对象,非法或空值直接返回 `null` 让脚本跳过此列。若真实写入报"URL 列类型不匹配",在 `asOptionalUrl` 里改成返回裸字符串重试即可(飞书两种格式接受度视 field 类型而定)。
+> 六维复盘字段的评分锚点见 [`interviewer-review-workflow.md`](interviewer-review-workflow.md)。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与文本列允许空,不影响其他列写入。
+> **「面试复盘报告」列在飞书 Base 里必须是「文本」或「超链接」类型**(不能是「附件」)。当前 `asOptionalUrl()` 把合法 URL 直接返回**裸字符串**,`+record-batch-create` payload 里作为文本值写入,飞书文本列/超链接列都接受该格式。若真实写入报"URL 列类型不匹配",先在飞书 Base 界面把该列类型改为「文本」而不是回来改脚本。
 > 「面试官(人员)」列与「处理状态」列不在本流水线的写入范围内——用户明确不管,飞书 Base 中允许为空。
 
 ### 输出
@@ -107,12 +107,23 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
   "deduplicatedRecords": 1,
   "inputDuplicatesDropped": 1,
   "created": 1,
+  "failed": 0,
+  "errors": [],
   "batchCreateFallback": false,
   "records": []
 }
 ```
 
 `records` 中姓名已脱敏，不包含逐字稿、评估总结、问题分析。
+
+**成功判定 4 要素**（4 个必须全部满足，缺一即视为失败重跑）：
+
+1. 退出码 `0`
+2. stdout JSON 中 `ok === true`
+3. `created === deduplicatedRecords`（没有静默失败的 record）
+4. `failed === 0`（`errors` 数组为空）
+
+只看 `ok:true` 是不够的——之前 `ok` 的语义包含"部分成功就算 ok",现已收紧,只有上述四条都过才是真通过。
 
 ## deduplicate-lark-base.mjs
 
@@ -144,8 +155,9 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 ### 去重规则
 
-1. **面试转写表**：按「面试ID + 申请ID」联合键去重（两个值同时相同才算重复），保留每组第一条，删除其余
-2. **空行跳过**：面试ID 或申请ID 为 null 的记录不参与去重，不会被删除
+1. **面试转写表**：按「面试ID + 申请ID」联合键去重（两个值同时相同才算重复），**保留每组最新一条**（record_id 倒序遍历下先命中的那条），删除其余
+2. **为什么保留最新**：每天 sync 会追加当天带评分和 HTML URL 的新记录，如果保留最旧反而会删掉当天新增的评分数据；倒序保留最新等价于保留"最近一次带评分的完整记录"
+3. **空行跳过**：面试ID 或申请ID 为 null 的记录不参与去重，不会被删除
 
 ### 输出
 

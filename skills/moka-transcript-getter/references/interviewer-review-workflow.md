@@ -18,7 +18,7 @@
 
 ## 2. 逐字稿量化(transcript_stats.py)
 
-- 把 `record.transcript` 写入 OS 临时目录的 `.txt`(文件名 `moka-transcript-<脱敏候选人>-<interviewId>.txt`,评分完成后删除)。
+- 把 `record.transcript` 写入 OS 临时目录的 `.txt`(文件名 **纯 ASCII**:`transcript-<interviewId>.txt`,评分完成后删除)。**脱敏候选人姓名只放 HTML 内容和日志文本,不进文件名**——文件名一律用 `interviewId` 唯一标识,规避 Windows PowerShell/GBK 环境下中文文件名 `spawn ENOENT`、`lark-cli drive +upload` 上传报错、跨端路径不可预测。
 - 执行:`python3 <skill目录>/scripts/transcript_stats.py <tmp.txt> --json`,拿到 JSON 统计。
 - 若 turn 数为 0(脚本没识别到说话人,通常是逐字稿格式异常),视为评分失败,写 `record.reviewError = "transcript_stats parsed 0 turns"`,不生成报告,不 upload,继续下一条。
 - 统计脚本不区分身份,面试官身份由当前 Claude 从内容判断(开场自称面试官 / 主要在问问题的一方)。
@@ -48,7 +48,7 @@
 
 ## 4. 生成 HTML(模板 token 全部替换)
 
-复制 `assets/report-template.html` 到 `reports/复盘报告-<脱敏候选人>-<interviewId>.html`,替换 18 个 token:
+复制 `assets/report-template.html` 到 `reports/review-<interviewId>.html`(**纯 ASCII 文件名**,不带候选人姓名),替换 18 个 token:
 
 | Token | 含义 | 空值兜底 |
 |---|---|---|
@@ -91,7 +91,7 @@
 
 ## 7. 安全约束(与 SKILL.md 一致)
 
-- 报告文件名、日志摘要中的候选人和面试官姓名**必须脱敏**;不得输出手机/邮箱/身份证/逐字稿正文。
+- **报告与临时文件名一律纯 ASCII**(`review-<interviewId>.html` / `transcript-<interviewId>.txt`),候选人和面试官姓名不进文件名。姓名只出现在 HTML 内容和日志文本里,且必须脱敏。不得输出手机/邮箱/身份证/逐字稿正文。
 - 临时 `.txt` 和临时 HTML 只落 OS 临时目录或 `<json 目录>/reports/`,**不进** skill 目录、不进插件仓库。
 - 云盘上传视为同租户内已授权 Base 相关流程,不视为新增外发;不上传到租户外的任何位置。
 - 不为评分/上传失败重新安装工具、删除 Chrome Profile、清空 Base——按 SKILL.md 「安全与边界」处理。
