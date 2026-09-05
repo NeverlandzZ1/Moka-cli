@@ -114,7 +114,7 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 }
 ```
 
-`records` 中姓名已脱敏，不包含逐字稿、评估总结、问题分析。
+`records` 只用于概览，不含逐字稿、评估总结、问题分析（长文本挤日志）。候选人姓名字段直接原文，不做处理。
 
 **成功判定 4 要素**（4 个必须全部满足，缺一即视为失败重跑）：
 

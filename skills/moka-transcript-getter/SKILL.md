@@ -340,7 +340,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
-- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,不带候选人姓名) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`(**纯 ASCII 文件名**,姓名只放 HTML 内容里、且脱敏),替换全部 18 个 `{{TOKEN}}`(替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。
+- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,原因见 Runbook——Windows 编码兼容,和脱敏无关) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(其中 `{{CANDIDATE}}` / `{{INTERVIEWER}}` 直接填**姓名原文**,不做处理;替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。
 - 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
 - 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
 
@@ -414,20 +414,15 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 ### 后处理-5. 汇总本次结果
 
-不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本。
+不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本(逐字稿正文过长会挤爆对话上下文,不是隐私问题)。
 
 每条本次处理的记录只汇报:
 
 ```text
-候选人:<脱敏后的 candidateName>｜面试官:<脱敏后的 interviewerNames,以顿号连接;缺失时写"未记录">｜岗位:<jobTitle>｜复盘:<有|无|失败>
+候选人:<candidateName>｜面试官:<interviewerNames,以顿号连接;缺失时写"未记录">｜岗位:<jobTitle>｜复盘:<有|无|失败>
 ```
 
-姓名脱敏规则:
-
-- 中文姓名保留姓氏,其余字符替换为 `*`: `张三` → `张*`,`王小明` → `王**`;单字姓名显示 `*`。
-- 英文姓名的每个单词只保留首字母,其余字符替换为 `*`: `Alice Smith` → `A**** S****`。
-- 中英文组合姓名分别按上述规则处理。
-- 真实姓名只允许写入本 Skill 固定配置且用户已授权的飞书 Base。不得在聊天回复、定时任务摘要、错误信息、调试日志、报告文件名或临时请求文件名中输出真实姓名。
+姓名原文直接汇报,不做处理——本 skill 的数据源是 HR 自己登录 Moka 后台采集,写入的是 HR 自己配置的飞书 Base,同租户内已授权。手机号、邮箱、身份证号仍不出现在对话摘要里(那些不是姓名字段)。
 
 最后汇报:
 
@@ -440,7 +435,7 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 - 飞书 Base 链接
 - 若有错误,列出阶段和简短错误原因
 
-不要汇报逐字稿正文、复盘评分细节或红线原文。没有今日记录时明确说"今日没有可导出的面试记录",仍报告采集状态、JSON 路径和 Base 链接。
+不要汇报逐字稿正文或红线原文(长文本挤对话)。评分细节可以直接说。没有今日记录时明确说"今日没有可导出的面试记录",仍报告采集状态、JSON 路径和 Base 链接。
 
 ## 成功路径 Runbook(定时任务作业模板)
 
@@ -451,7 +446,7 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 1. 解析并保存 Skill 绝对路径:所有后续命令用 `<Skill目录>/scripts/xxx.mjs`,**不用**相对路径 `scripts/xxx.mjs`(宿主 shell 的 cwd 不在 skill 目录)。
 2. 解析 lark-cli 绝对路径:Windows `where lark-cli`,macOS/Linux `which lark-cli`。所有 `.mjs` 都追加 `--lark-cli "<路径>"`。
 3. Windows 上执行 Node/Python 前设 `chcp 65001` 并注入 `PYTHONIOENCODING=utf-8`。禁止在 PowerShell 里用 `&&` 串命令,一行一条。
-4. **禁止 Agent 直接调 `lark-cli` 写入/上传/删除**。只允许调 skill 自带的 `.mjs` 包装脚本——它们已经内嵌了字段类型兼容、@file 相对路径、失败降级、脱敏日志。
+4. **禁止 Agent 直接调 `lark-cli` 写入/上传/删除**。只允许调 skill 自带的 `.mjs` 包装脚本——它们已经内嵌了字段类型兼容、@file 相对路径、失败降级、错误汇总。
 
 **默认模式骨架**:
 
@@ -521,7 +516,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 | 现象 | 根因 | 处置 |
 |---|---|---|
 | `lark-cli drive +upload` 报 `unsafe file path: must be a relative path within the current directory` | 直接把绝对路径喂给了 lark-cli | **只调 `upload-html-to-drive.mjs`,不要自己拼 `lark-cli drive +upload`**——脚本已在内部 chdir 到 HTML 目录并传相对文件名 |
-| 报告文件名带 `**` 或中文,`Errno 22 Invalid argument` | Windows 文件名禁用 `**`,中文在部分 Node/Python 版本上编码不稳 | 报告/临时文件名**只用 ASCII**:`review-<interviewId>.html`、`transcript-<interviewId>.txt`。脱敏候选人姓名只放在**HTML 内容里**,不要进文件名 |
+| 报告文件名带 `**` 或中文,`Errno 22 Invalid argument` | Windows 文件名禁用 `**`,中文在部分 Node/Python 版本上编码不稳 | 报告/临时文件名**只用 ASCII**:`review-<interviewId>.html`、`transcript-<interviewId>.txt`。候选人姓名放在 **HTML 内容里**即可,不进文件名(纯技术原因,不是脱敏要求) |
 | upload 成功但拿不到 URL | lark-cli 输出格式变了,`file_token` 不在预期位置 | 查 `upload-html-to-drive.mjs` 的 `extractFileToken()`,追加新的取值路径;不要绕开脚本 |
 
 ### Base 写入阶段(最容易掉链子)
@@ -557,7 +552,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
 - [ ] **不直接调 `lark-cli`** 写入、上传、删除——只调 skill 提供的 3 个 `.mjs`。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
-- [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),脱敏姓名放在 HTML 内容里而非文件名。
+- [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),姓名放在 HTML 内容里(纯技术兼容要求,不是脱敏)。
 - [ ] 大 JSON 结构探查用 `node -e` / `python -c`,不用 `grep` / `Read` 硬碰。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
@@ -569,7 +564,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 - 不使用 mitmproxy 完成日常采集；不要求用户提供抓包或凭证。
 - 不把 JSON 数据文件写进插件仓库或 Skill 目录。
 - 只把候选人数据写入本 Skill 固定配置的飞书 Base；不上传或发送到其他位置。
-- 对话汇报、自动化摘要、错误信息和调试日志中的候选人及面试官姓名必须脱敏；不得输出手机号、邮箱、身份证号或逐字稿正文。
+- 对话汇报、自动化摘要、错误信息和调试日志中**不要输出**手机号、邮箱、身份证号或逐字稿正文。候选人及面试官**姓名可直接原文使用**——数据源是授权 HR 采集,姓名不做处理。
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
 - 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。
 - sync 脚本不保证无重复——重复由 dedup 脚本统一清理。

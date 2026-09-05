@@ -18,7 +18,7 @@
 
 ## 2. 逐字稿量化(transcript_stats.py)
 
-- 把 `record.transcript` 写入 OS 临时目录的 `.txt`(文件名 **纯 ASCII**:`transcript-<interviewId>.txt`,评分完成后删除)。**脱敏候选人姓名只放 HTML 内容和日志文本,不进文件名**——文件名一律用 `interviewId` 唯一标识,规避 Windows PowerShell/GBK 环境下中文文件名 `spawn ENOENT`、`lark-cli drive +upload` 上传报错、跨端路径不可预测。
+- 把 `record.transcript` 写入 OS 临时目录的 `.txt`(文件名 **纯 ASCII**:`transcript-<interviewId>.txt`,评分完成后删除)。**候选人姓名不进文件名**——文件名一律用 `interviewId` 唯一标识,原因是 Windows PowerShell/GBK 环境下中文文件名容易 `spawn ENOENT`、`lark-cli drive +upload` 拒收、跨端路径不可预测。**这是纯技术兼容要求,与脱敏无关**;姓名会在 HTML 内容里原文显示。
 - 执行:`python3 <skill目录>/scripts/transcript_stats.py <tmp.txt> --json`,拿到 JSON 统计。
 - 若 turn 数为 0(脚本没识别到说话人,通常是逐字稿格式异常),视为评分失败,写 `record.reviewError = "transcript_stats parsed 0 turns"`,不生成报告,不 upload,继续下一条。
 - 统计脚本不区分身份,面试官身份由当前 Claude 从内容判断(开场自称面试官 / 主要在问问题的一方)。
@@ -52,9 +52,9 @@
 
 | Token | 含义 | 空值兜底 |
 |---|---|---|
-| `{{CANDIDATE}}` | 脱敏候选人姓名(中文姓氏保留 / 英文首字母保留) | 「候选人」 |
-| `{{INTERVIEWER}}` | 脱敏面试官姓名 | 「面试官」 |
-| `{{INTERVIEWER_INITIAL}}` | 面试官名字首字符(脱敏后) | 「?」 |
+| `{{CANDIDATE}}` | 候选人姓名(原文,不做处理) | 「候选人」 |
+| `{{INTERVIEWER}}` | 面试官姓名(原文,不做处理) | 「面试官」 |
+| `{{INTERVIEWER_INITIAL}}` | 面试官名字首字符(取姓名第一个字符即可) | 「?」 |
 | `{{DATE}}` | 面试日期 `YYYY-MM-DD`(取 `record.startTime` 转北京时间) | `record.generatedAt` 或今日 |
 | `{{ROUND}}` | 面试轮次(`record.roundName`) | 「未记录」 |
 | `{{DIRECTION}}` | 岗位方向短标签(如「产品」「后端」) | `record.jobTitle` |
@@ -91,7 +91,7 @@
 
 ## 7. 安全约束(与 SKILL.md 一致)
 
-- **报告与临时文件名一律纯 ASCII**(`review-<interviewId>.html` / `transcript-<interviewId>.txt`),候选人和面试官姓名不进文件名。姓名只出现在 HTML 内容和日志文本里,且必须脱敏。不得输出手机/邮箱/身份证/逐字稿正文。
+- **报告与临时文件名一律纯 ASCII**(`review-<interviewId>.html` / `transcript-<interviewId>.txt`),候选人和面试官姓名不进文件名——**这是 Windows/lark-cli 的技术兼容要求,不是脱敏**。姓名在 HTML 内容和日志文本里原文使用。不得输出手机/邮箱/身份证/逐字稿正文。
 - 临时 `.txt` 和临时 HTML 只落 OS 临时目录或 `<json 目录>/reports/`,**不进** skill 目录、不进插件仓库。
 - 云盘上传视为同租户内已授权 Base 相关流程,不视为新增外发;不上传到租户外的任何位置。
 - 不为评分/上传失败重新安装工具、删除 Chrome Profile、清空 Base——按 SKILL.md 「安全与边界」处理。

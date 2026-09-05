@@ -238,14 +238,12 @@ function transcriptFields(record) {
   };
 }
 
-// ─── 脱敏 ─────────────────────────────────────────────────────
+// ─── 姓名摘要工具 ────────────────────────────────────────────────
 function maskName(name) {
+  // 姓名不做脱敏处理：数据源是授权 HR 采集，写入的是 HR 自己的飞书 Base。
+  // 函数名保留是为了避免调用方大改；语义已改为"返回原文姓名，缺失时给未记录兜底"。
   const text = asText(name).trim();
-  if (!text) return "未记录";
-  return text
-    .replace(/[\u3400-\u9fff]+/g, (part) => (part.length === 1 ? "*" : `${part[0]}${"*".repeat(part.length - 1)}`))
-    .replace(/[A-Za-z]+/g, (part) => (part.length === 1 ? part : `${part[0]}${"*".repeat(part.length - 1)}`))
-    .replace(/\d/g, "*");
+  return text || "未记录";
 }
 
 // ─── lark-cli 调用层 ─────────────────────────────────────────
@@ -481,7 +479,7 @@ export async function sync(options) {
   // 批量创建面试转写
   const transcriptResults = await batchCreateTranscripts(config, deduped.records, summary);
 
-  // 组装脱敏摘要
+  // 组装摘要（姓名原文，不做脱敏）
   summary.records = transcriptResults.map(({ record, recordId, operation, error }) => ({
     applicationId: record.applicationId,
     interviewId: record.interviewId,
