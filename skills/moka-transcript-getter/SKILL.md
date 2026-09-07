@@ -39,6 +39,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 飞书云盘上传脚本：`scripts/upload-html-to-drive.mjs`（把面试复盘 HTML 报告上传到当前用户云盘根目录，返回可访问 URL）
+- 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列）
 - 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
 - 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`）
 - 模板 Logo：`assets/logo.png`
@@ -377,7 +378,7 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 
 **任何一条不满足**就必须在汇报里写"sync 未完全成功",并附上 `stats.errors` 或 stdout 中的失败详情(不含逐字稿正文)。**不要**因为 ok:true 就直接判定通过——旧脚本在有失败时会误报 ok:true,新脚本已收紧,但若字段缺失说明脚本还没更新。
 
-sync 脚本自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值,以及「面试复盘报告」文本 URL 列;评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「面试官(人员)」和「处理状态」列本流水线不管。
+sync 脚本自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值,以及「面试复盘报告」文本 URL 列;评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「处理状态」列本流水线不管。「面试官(人员)」列由后置的 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填(见下文 后处理-5),失败时该列留空,不影响本步已写入的其他列。
 
 「面试复盘报告」列**必须是文本或超链接类型**——若飞书 Base 上是附件类型,OpenAPI 不允许写附件单元格,整条 record 会被拒(实测走这个坑)。当前 Base 已经由用户手动改成文本列,直接写字符串 URL。
 
@@ -412,7 +413,28 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件。
 
-### 后处理-5. 汇总本次结果
+### 后处理-5. 回填「面试官(人员)」列
+
+```text
+node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
+```
+
+若 `lark-cli` 不在 PATH,追加 `--lark-cli "<路径>"`。
+
+**为什么放在 dedup 之后**: 先去重再回填,只处理留下的最新一条,不浪费 API 调用去填马上要被删的旧记录。
+
+**脚本做什么**(4 步):
+
+1. 拿「面试官」text 列 / 「面试官(人员)」user 列 / 「面试ID」三列的 field_id;人员列显示名支持半/全角括号与括号内外空格的容错匹配。
+2. `+record-list --field-id ...` 按行投影拉全表,挑出「面试官 text 有值,但 面试官(人员) user 为空」的记录。
+3. 建 `name → open_id` 映射:先从同表已填充记录里按顺序拆解(要求名字数量 = 人员数量,不匹配的行跳过);缺失的姓名再用 `lark-cli contact +search-user --query <name>` 兜底。
+4. 逐条 `+record-upsert --record-id X --json {"面试官(人员)":[{id:openId}, ...]}`,默认 3 并发。
+
+**成功判定**:退出码 0 且 stdout JSON `ok === true` 且 `failed === 0`。`unresolvedNames` 可以非空——`search-user` 找不到的姓名会挂在里面,不算 fatal,该 record 若还有其他姓名解析成功,人员列会**部分回填**;所有姓名都解析不上的 record 会归到 `skipped`,人员列继续留空。
+
+**失败/部分失败时的处置**:回填失败**不阻塞本次采集结果汇报**,把 stdout 的 `unresolvedNames` 和 `errors` 摘要附到 后处理-6 汇总里,让 HR 判断是否人工补录。**不要**因为回填失败而重跑整个流水线,也不要重装工具或改脚本。
+
+### 后处理-6. 汇总本次结果
 
 不要在对话中输出 `transcript`、`evaluationSummary`、`questionAnalysis` 等长文本(逐字稿正文过长会挤爆对话上下文,不是隐私问题)。
 
@@ -430,6 +452,7 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 - 本次评分成功/失败/跳过的记录数,HTML 云盘上传成功/失败数
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
+- 面试官(人员)回填结果: `backfilled` / `skipped` / `failed`,若有 `unresolvedNames` 逐个列出(仅姓名,不带 open_id)
 - 上述每条简要信息
 - JSON 的绝对保存路径
 - 飞书 Base 链接
@@ -463,6 +486,9 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<PATH>" --lark-cli "<la
 
 # 4. 去重(保留最新)
 node "<Skill目录>/scripts/deduplicate-lark-base.mjs" --lark-cli "<lark-cli 绝对路径>"
+
+# 5. 回填「面试官(人员)」列(dedup 之后, 只填留下的最新一条)
+node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --lark-cli "<lark-cli 绝对路径>"
 ```
 
 **全模式骨架**:
@@ -479,7 +505,7 @@ opencli moka export-transcripts --output "<PATH>" --overwrite -f json
 opencli moka mode social -f json
 opencli moka export-transcripts --output "<PATH>" -f json
 
-# 4~6 = 默认模式 2~4
+# 4~7 = 默认模式 2~5
 ```
 
 **成功判定**(每一步必须核对,不能只看"命令有输出"):
@@ -490,6 +516,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 | upload-html-to-drive.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `url` 以 `https://` 开头 |
 | sync-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true` **并且** `created === deduplicatedRecords` **并且** `failed === 0`。**旧版本 sync 会在有失败时误报 ok:true,新版本已收紧;若字段缺失说明脚本没更新。** |
 | deduplicate-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true`(失败不阻塞汇报,但要在汇总里带上 `failed`/`errors`) |
+| backfill-interviewer-user.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `failed===0`。`unresolvedNames` 可以非空(search-user 找不到的姓名),`skipped` 也可以非空(所有姓名都解析不上的 record),都不算 fatal;把摘要附到汇总即可 |
 
 ## 错误速查表(先查表,不要瞎猜)
 
@@ -550,12 +577,13 @@ opencli moka export-transcripts --output "<PATH>" -f json
 
 - [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
-- [ ] **不直接调 `lark-cli`** 写入、上传、删除——只调 skill 提供的 3 个 `.mjs`。
+- [ ] **不直接调 `lark-cli`** 写入、上传、删除——只调 skill 提供的 4 个 `.mjs`(sync / dedup / upload-html-to-drive / backfill-interviewer-user)。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
 - [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),姓名放在 HTML 内容里(纯技术兼容要求,不是脱敏)。
 - [ ] 大 JSON 结构探查用 `node -e` / `python -c`,不用 `grep` / `Read` 硬碰。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
+- [ ] backfill-interviewer-user.mjs 在 dedup 之后执行,失败/`unresolvedNames`不阻塞汇报,把摘要附到汇总即可。
 - [ ] 出现任何写入失败**不重跑整个流水线**——把 `errors` 附到汇总,让 HR 决定。
 
 
@@ -569,5 +597,5 @@ opencli moka export-transcripts --output "<PATH>" -f json
 - 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。
 - sync 脚本不保证无重复——重复由 dedup 脚本统一清理。
 - dedup 脚本使用逐条删除（`+record-delete --record-id`），不使用 batch delete 接口——后者在实测中会静默失败。
-- 不写入或维护面试官信息表（已废弃）；面试官姓名仅作为 text 写入面试转写表。
+- 不写入或维护面试官信息表（已废弃）；面试官姓名作为 text 写入面试转写表的「面试官」列，dedup 之后由 `backfill-interviewer-user.mjs` 通过 `contact +search-user` 解析出 open_id 回填「面试官(人员)」user 列。
 - 默认 JSON 是单次中转文件，不承担历史存储。
