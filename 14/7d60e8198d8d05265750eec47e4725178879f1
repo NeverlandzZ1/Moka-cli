@@ -1,0 +1,23 @@
+skills/moka-transcript-getter/references/lark-base-write.md
+  s_9d988f2c5f030f::t_b5d543e0efc84b 97-98,101
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_dc8aa1fb399589 382
+skills/moka-transcript-getter/scripts/sync-lark-base.mjs
+  s_9d988f2c5f030f::t_87380fbb71d53e 214-220,245-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "147d60e8198d8d05265750eec47e4725178879f1",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "ep-bpcl3tow"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
