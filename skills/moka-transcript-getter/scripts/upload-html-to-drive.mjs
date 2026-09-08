@@ -17,6 +17,9 @@
  *  - 上传位置固定为「当前登录用户的云盘根目录」(不传 --parent-node,不新增 feishu_drive_folder_token 配置)。
  *  - tenant 从 ~/.opencli/moka-config.json 的 feishu_base_url host 提取(与 sync 脚本共用一份配置)。
  *  - 上传失败要抛错(exit 1),让上游流水线停下、留原始报错让人排查。
+ *  - 上传前会把模板里 `<img src="icon/*.png">` 的 badge 图标改写成 base64 data URL 内联,
+ *    这样云盘 URL 打开的是自包含单文件 HTML,不依赖外部 `icon/` 目录。
+ *    图标源在 `../assets/icon/`,7 个文件名固定见 evaluation-guide §3。
  */
 
 import { spawn } from "node:child_process";
@@ -24,6 +27,10 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ICON_DIR = path.resolve(__dirname, "..", "assets", "icon");
 
 const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".opencli", "moka-config.json");
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -150,6 +157,35 @@ function extractFileToken(envelope) {
     || null;
 }
 
+const iconCache = new Map();
+function loadIconDataUri(filename) {
+  if (iconCache.has(filename)) return iconCache.get(filename);
+  const abs = path.join(ICON_DIR, filename);
+  const bytes = fsSync.readFileSync(abs);
+  const dataUri = `data:image/png;base64,${bytes.toString("base64")}`;
+  iconCache.set(filename, dataUri);
+  return dataUri;
+}
+
+/**
+ * 把 HTML 里 `<img src="icon/xxx.png" ...>` 的 src 替换成 base64 data URL,
+ * 让上传后的单文件 HTML 不依赖外部资源。找不到本地文件的图标保持原样,由 lark-cli 上传结果决定后续。
+ * 只匹配 `src="icon/..."` 的形式,避免误伤外链或 data URL。
+ */
+function inlineBadgeIcons(html) {
+  return html.replace(
+    /(<img[^>]*\bsrc\s*=\s*)(["'])icon\/([^"']+)\2/gi,
+    (match, prefix, quote, filename) => {
+      try {
+        const dataUri = loadIconDataUri(filename);
+        return `${prefix}${quote}${dataUri}${quote}`;
+      } catch {
+        return match;
+      }
+    }
+  );
+}
+
 async function upload(options) {
   if (!options.file) throw new UploadError("--file is required");
   const absPath = path.resolve(options.file);
@@ -159,6 +195,14 @@ async function upload(options) {
   const tenantHost = resolveTenantHost(options);
   const larkCli = resolveLarkCli(options);
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+
+  // 上传前把 badge PNG 内联到 HTML,变成自包含单文件。原地覆盖同一个 HTML,
+  // 保留在本地供人工排查(路径与上传上去的内容一致)。
+  const original = fsSync.readFileSync(absPath, "utf8");
+  const inlined = inlineBadgeIcons(original);
+  if (inlined !== original) {
+    fsSync.writeFileSync(absPath, inlined, "utf8");
+  }
 
   // lark-cli drive +upload 校验 "must be a relative path within cwd":
   // 直接传绝对路径会被拒。改为切到 HTML 所在目录,只传文件名。
@@ -210,4 +254,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   await main();
 }
 
-export { upload };
+export { upload, inlineBadgeIcons };

@@ -13,7 +13,7 @@
   其余 3 张（面试官/候选人说话占比、提问结构）保留进度条，口径见 evaluation-guide §4
   （2026-08-24 会议要求砍掉了"最长单段发言"这张）。
   称号：不分层级，是"这场六维里哪个维度最亮眼"，**只在正文顶部 .verdict 区块出现一次**
-  （侧栏不再重复展示）——{{BADGE_SHORT}} 填 `.badge` 方块里的**图标字符**（不是文字缩写，是固定
+  （侧栏不再重复展示）——{{BADGE_ICON}} 填 `.badge` 里的**图标图片文件名**（不是文字缩写，是固定
   映射的单个符号：破冰高手⚑ / 灵魂提问官? / 最佳听众≈ / 追问达人◎ / 分寸感在线⚖ / 暖心体验官♥ /
   案件待复核▦，映射表见 evaluation-guide §3，不用自己现想）；{{BADGE_LABEL}} 填 `.lb` 那行小字
   eyebrow，六个正向称号时固定是「本场获得称号」；{{BADGE_NAME}} 当 h2 标题——六个正向称号时
@@ -28,7 +28,7 @@
   不再有 GRADE / GRADE_BAND / SCORE / VERDICT_TITLE / VERDICT_DESC / JUDGE_TAG 这几个 token，
   报告任何位置都不出现字母评级、0–100 分数，也不出现"最大短板"这类评价性结论句
   （2026-08-24、2026-08-31 会议/用户反馈要求，避免面试官把复盘读成对自己的评价）。命中合规红线时
-  {{BADGE_SHORT}} 固定填「▦」，{{BADGE_LABEL}}/{{BADGE_NAME}} 填「本场请注意」/「涉及XX问题」
+  {{BADGE_ICON}} 固定填「本场请注意.png」，{{BADGE_LABEL}}/{{BADGE_NAME}} 填「本场请注意」/「涉及XX问题」
   （XX 按实际命中的红线类别填，不是固定字符串），{{BADGE_LINE}} 客观说明触碰了
   哪条红线，不套用其余六个亮点称号。命中合规红线（red-lines §1–§9）的条目用独立的 `.redline`
   卡片单独醒目列出（红色调，不是普通 `.card` 的蓝白玻璃），插在「可以更好的地方」table **上方**，
@@ -119,7 +119,7 @@
   body.sidebar-collapsed .collapse-btn{left:51px}
   .collapse-btn:hover{color:var(--accent-deep);border-color:rgba(10,132,255,.35)}
   .collapse-btn .ci{display:block;font-size:13px;line-height:1;transition:transform .22s ease}
-  .sidebar.collapsed .collapse-btn .ci{transform:rotate(180deg)}
+  body.sidebar-collapsed .collapse-btn .ci{transform:rotate(180deg)}
   .brand{display:flex;align-items:center;gap:11px;margin-bottom:24px}
   .brand .ic{width:34px;height:34px;flex-shrink:0;object-fit:contain;filter:drop-shadow(0 4px 8px rgba(10,132,255,.28))}
   .brand b{font-size:15px;font-weight:600;display:block;line-height:1.25}.brand span{font-size:12px;color:var(--text-3)}
@@ -141,7 +141,7 @@
   .head h1{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1.1}
   .head p{margin-top:7px;font-size:14px;color:var(--text-2)}.head p b{color:var(--text);font-weight:500}
   .verdict{border-radius:var(--r);padding:24px 26px;margin-bottom:8px;display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:linear-gradient(135deg,rgba(10,132,255,.11),rgba(255,255,255,.5) 70%);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(10,132,255,.16);box-shadow:0 2px 4px rgba(10,100,210,.05),0 16px 40px rgba(10,100,210,.13)}
-  .verdict .badge{flex:0 0 auto;width:64px;height:64px;border-radius:18px;display:grid;place-items:center;color:#fff;font-size:30px;line-height:1;font-weight:500;background:linear-gradient(160deg,#3a9bff,#0064d2);box-shadow:0 8px 22px rgba(10,132,255,.34)}
+  .verdict .badge{flex:0 0 auto;width:64px;height:64px;border-radius:18px;overflow:hidden;display:grid;place-items:center;background:transparent}.verdict .badge img{width:100%;height:100%;object-fit:contain;display:block}
   .verdict .vt{flex:1;min-width:280px}
   .verdict .vt .lb{font-size:12px;color:var(--text-3);margin-bottom:3px}
   .verdict .vt h2{font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;line-height:1.35}
@@ -201,7 +201,7 @@
   td .ev{background:rgba(10,132,255,.05);padding:8px 11px;border-radius:10px;font-size:12.5px;color:var(--text);line-height:1.5}
   td .ev + .ev{margin-top:6px}
   td .ev .ts{color:var(--accent-deep);font-weight:600;margin-right:7px;font-variant-numeric:tabular-nums}
-  .advice{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+  .advice{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
   .adv{padding:20px}
   .adv .ic{width:30px;height:30px;border-radius:10px;background:var(--accent-tint);color:var(--accent-deep);display:grid;place-items:center;font-size:15px;font-weight:600;margin-bottom:13px}
   .adv b{font-size:14.5px;font-weight:600;display:block;margin-bottom:6px}.adv p{font-size:12.5px;color:var(--text-2);line-height:1.55}
@@ -227,7 +227,7 @@
       <a href="#kpi"><span class="dot"></span>量化快照</a>
       <a href="#good"><span class="dot"></span>做得好的地方</a>
       <a href="#bad"><span class="dot"></span>可以更好的地方</a>
-      <a href="#next"><span class="dot"></span>下一步动作</a>
+      <a href="#next"><span class="dot"></span>后续关注的地方</a>
     </nav>
   </aside>
 
@@ -238,7 +238,7 @@
     </div>
 
     <div class="verdict">
-      <div class="badge">{{BADGE_SHORT}}</div>
+      <div class="badge"><img src="icon/{{BADGE_ICON}}" alt="{{BADGE_NAME}}"></div>
       <div class="vt">
         <div class="lb">{{BADGE_LABEL}}</div>
         <h2>{{BADGE_NAME}}</h2>
@@ -275,7 +275,7 @@
       </table>
     </div>
 
-    <div class="sec" id="next"><h3>下一步:给这位面试官的 4 条动作</h3><span class="line"></span></div>
+    <div class="sec" id="next"><h3>后续关注的地方</h3><span class="line"></span></div>
     <div class="advice">
       {{ADVICE_CARDS}}
     </div>

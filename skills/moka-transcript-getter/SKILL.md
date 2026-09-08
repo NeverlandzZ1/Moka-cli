@@ -38,11 +38,12 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
-- 飞书云盘上传脚本：`scripts/upload-html-to-drive.mjs`（把面试复盘 HTML 报告上传到当前用户云盘根目录，返回可访问 URL）
+- 飞书云盘上传脚本：`scripts/upload-html-to-drive.mjs`（把面试复盘 HTML 报告上传到当前用户云盘根目录，返回可访问 URL；上传前会自动把模板里的 `<img src="icon/*.png">` 内联成 base64 data URL，云盘 URL 打开即得单文件 HTML，不依赖外部 `icon/` 目录）
 - 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列）
 - 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
-- 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`）
+- 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`；其中 `{{BADGE_ICON}}` 填 PNG 文件名，由 upload 脚本 base64 内联）
 - 模板 Logo：`assets/logo.png`
+- 复盘称号图标目录：`assets/icon/`（7 张 PNG：`破冰高手.png`、`灵魂提问官.png`、`最佳听众.png`、`追问达人.png`、`分寸感在线.png`、`暖心体验官.png`、`本场请注意.png`；`{{BADGE_ICON}}` 只能从这 7 个文件名里选）
 - 脚本契约：`references/lark-base-write.md`
 - 评分与报告执行契约：`references/interviewer-review-workflow.md`
 - 评分锚点与话术：`references/evaluation-guide.md`、`references/interview-toolkit.md`、`references/red-lines.md`
@@ -341,7 +342,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
-- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,原因见 Runbook——Windows 编码兼容,和脱敏无关) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(其中 `{{CANDIDATE}}` / `{{INTERVIEWER}}` 直接填**姓名原文**,不做处理;替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。
+- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,原因见 Runbook——Windows 编码兼容,和脱敏无关) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(其中 `{{CANDIDATE}}` / `{{INTERVIEWER}}` 直接填**姓名原文**,不做处理;`{{BADGE_ICON}}` 只能从 `assets/icon/` 下 7 个 PNG 文件名里选(`破冰高手.png` / `灵魂提问官.png` / `最佳听众.png` / `追问达人.png` / `分寸感在线.png` / `暖心体验官.png` / `本场请注意.png`——红线命中固定用最后一个),不要写字符或 emoji;替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。**badge PNG 的 base64 内联由下一步的 upload 脚本自动完成**,当前 Claude 只需填对文件名,不要自己转 base64。
 - 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
 - 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
 

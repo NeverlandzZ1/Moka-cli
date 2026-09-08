@@ -60,7 +60,7 @@
 | `{{DIRECTION}}` | 岗位方向短标签(如「产品」「后端」) | `record.jobTitle` |
 | `{{DIRECTION_FULL}}` | 完整岗位(`record.jobTitle`) | 「未记录」 |
 | `{{DURATION_CN}}` | 中文时长(如「56 分钟」),从 stats 的 `span.duration_min` 换算 | 「未记录时长」 |
-| `{{BADGE_SHORT}}` | 图标字符,固定 6 维 → `⚑ ? ≈ ◎ ⚖ ♥`;命中红线 → `▦` | 见 evaluation-guide §3 |
+| `{{BADGE_ICON}}` | 图标 PNG 文件名(不含目录,模板里通过 `<img src="icon/{{BADGE_ICON}}">` 引用):`破冰高手.png` / `灵魂提问官.png` / `最佳听众.png` / `追问达人.png` / `分寸感在线.png` / `暖心体验官.png`;命中红线固定填 `本场请注意.png` | 见 evaluation-guide §3 |
 | `{{BADGE_LABEL}}` | 「本场获得称号」或(红线)「本场请注意」 | — |
 | `{{BADGE_NAME}}` | 6 维称号(见 evaluation-guide §3 表)或「涉及XX问题」 | — |
 | `{{BADGE_LINE}}` | 20–35 字的具体亮点/红线陈述,必须挂原话证据 | — |
@@ -75,6 +75,7 @@
 - 打分低的维度必须在「可以更好的地方」有对应条目,打分高的必须在「亮点」有对应条目——雷达和正文互证。
 - 红线情况:除了改 `{{BADGE_*}}` 外,红线告警区块由模板固有 `#redline-alert`(如存在)控制。若模板里没有独立区块,把红线陈述并入 `{{BADGE_LINE}}` 与 `{{IMPROVE_ROWS}}` 首条。
 - 替换完成后 **grep `{{[A-Z_]+}}` 应无剩余 token**(HTML 顶部注释里如残留字面量示例除外)。
+- **badge PNG 内联**:模板里写的是 `<img src="icon/{{BADGE_ICON}}">` 的相对路径,但云盘上传的是单文件 HTML(附近拿不到 `icon/` 目录)。生成 HTML 时(替换 token 后、上传前)必须把该 `<img>` 的 `src` 改写成 `data:image/png;base64,<...>`,PNG 源文件来自 `assets/icon/<BADGE_ICON>`。此步由 `scripts/upload-html-to-drive.mjs` 在上传前自动完成,当前 Claude 手动生成报告时不需要另做处理。
 
 ## 5. 上传飞书云盘 + 回填 JSON
 
