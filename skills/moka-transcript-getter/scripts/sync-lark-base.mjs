@@ -211,6 +211,13 @@ function stringifyQuestionAnalysis(value) {
 
 function transcriptFields(record) {
   const reviewScores = record.reviewScores || {};
+  const redLineHits = Array.isArray(reviewScores.redLineHits) ? reviewScores.redLineHits : [];
+  // 「是否标红」= 该场评分是否命中任一合规红线(evaluation-guide + red-lines.md 判定)。
+  // 命中即「是」,否则「否」——必须是严格字面量,不带空格,飞书单选列按选项名字精确匹配。
+  // 只在评分环节真正跑过时才回填(有 reviewScores 或 reviewError 说明流程走过);
+  // 完全未评分的记录(采集侧字段有,但评分侧全空)保持空值,避免误标「否」。
+  const reviewRan = record.reviewScores !== undefined || record.reviewError !== undefined;
+  const redlineFlag = reviewRan ? (redLineHits.length > 0 ? "是" : "否") : null;
   return {
     "候选人姓名": asText(record.candidateName),
     "岗位名称": asText(record.jobTitle),
@@ -235,6 +242,10 @@ function transcriptFields(record) {
     "面试官复盘-尺度把控": asOptionalNumber(reviewScores.scaleControl),
     "面试官复盘-反馈体验": asOptionalNumber(reviewScores.feedbackExperience),
     "面试复盘报告": asOptionalUrl(record.reviewReportUrl),
+    // 单选列。严格字面量「是」/「否」,不带空格、不加标点,飞书按选项名精确匹配。
+    "是否标红": redlineFlag,
+    // 单选列。本流水线固定写「否」,后续人工/其他流程负责翻成「是」。
+    "是否已通知": reviewRan ? "否" : null,
   };
 }
 

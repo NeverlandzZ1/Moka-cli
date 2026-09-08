@@ -94,8 +94,11 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 | 面试官复盘-尺度把控 | `reviewScores.scaleControl` | JSON number(0~5,0.5 精度)或 null |
 | 面试官复盘-反馈体验 | `reviewScores.feedbackExperience` | JSON number(0~5,0.5 精度)或 null |
 | 面试复盘报告 | `reviewReportUrl` | 文本 URL 字符串,非 `https?://` 开头传 null |
+| 是否标红 | 由 `reviewScores.redLineHits` 派生 | 单选选项名字符串,严格「是」/「否」,不带空格。`redLineHits` 数组非空 → 「是」,否则 → 「否」;评分未跑(无 `reviewScores` 与 `reviewError`)时传 null,不占列 |
+| 是否已通知 | 由本流水线固定值 | 单选选项名字符串,固定写「否」;后续人工/其他流程负责翻为「是」,不在本流水线职责内。评分未跑时传 null |
 
 > 六维复盘字段的评分锚点见 [`interviewer-review-workflow.md`](interviewer-review-workflow.md)。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与文本列允许空,不影响其他列写入。
+> **「是否标红」「是否已通知」是飞书单选列**(不是复选/多选)。写入值必须与 Base 上选项名**逐字节相等**——多一个空格或写成半角字母都会被飞书拒收或落成新选项。当前脚本硬编码「是」/「否」两个字面量,若有人在 Base 上把选项名改了,先在 Base 侧改回来,不改脚本。
 > **「面试复盘报告」列在飞书 Base 里必须是「文本」或「超链接」类型**(不能是「附件」)。当前 `asOptionalUrl()` 把合法 URL 直接返回**裸字符串**,`+record-batch-create` payload 里作为文本值写入,飞书文本列/超链接列都接受该格式。若真实写入报"URL 列类型不匹配",先在飞书 Base 界面把该列类型改为「文本」而不是回来改脚本。
 > 「处理状态」列不在本流水线的写入范围内。「面试官(人员)」列由 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填,失败或姓名解析不上时该列留空,不影响 sync 本步已写入的其他列。
 
