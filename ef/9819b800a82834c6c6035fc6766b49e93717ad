@@ -1,0 +1,34 @@
+skills/moka-transcript-getter/references/evaluation-guide.md
+  s_9d988f2c5f030f::t_c998ac311d7313 67
+  s_9d988f2c5f030f::t_931e0df7d739ba 52,54-61
+skills/moka-transcript-getter/references/interviewer-review-workflow.md
+  s_9d988f2c5f030f::t_f8270ab07738a0 78
+  s_9d988f2c5f030f::t_f9dfaeee5155ce 63
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_6d780820434d29 345
+  s_9d988f2c5f030f::t_4e6530b0351e0f 41,44,46
+skills/moka-transcript-getter/assets/report-template.html
+  s_9d988f2c5f030f::t_227b233bc26a43 122
+  s_9d988f2c5f030f::t_6c2d333b34583e 16,31,144,204,230,241,278
+skills/moka-transcript-getter/scripts/upload-html-to-drive.mjs
+  s_9d988f2c5f030f::t_e8e30cf8d08b1a 20-22
+  s_9d988f2c5f030f::t_d17bcd42084745 31-34
+  s_9d988f2c5f030f::t_d0f742b8e0e3e4 257
+  s_9d988f2c5f030f::t_46305dd7d71585 160-188,199-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "ef9819b800a82834c6c6035fc6766b49e93717ad",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "arn:aws:bedrock:us-west-2:456197019624:application-inference-profile/bumrjndkqzw8"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
