@@ -201,12 +201,31 @@
   td .ev{background:rgba(10,132,255,.05);padding:8px 11px;border-radius:10px;font-size:12.5px;color:var(--text);line-height:1.5}
   td .ev + .ev{margin-top:6px}
   td .ev .ts{color:var(--accent-deep);font-weight:600;margin-right:7px;font-variant-numeric:tabular-nums}
-  .advice{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .advice{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
   .adv{padding:20px}
   .adv .ic{width:30px;height:30px;border-radius:10px;background:var(--accent-tint);color:var(--accent-deep);display:grid;place-items:center;font-size:15px;font-weight:600;margin-bottom:13px}
   .adv b{font-size:14.5px;font-weight:600;display:block;margin-bottom:6px}.adv p{font-size:12.5px;color:var(--text-2);line-height:1.55}
   .mfoot{margin-top:36px;padding-top:16px;border-top:1px solid var(--hair-soft);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-3)}
   @media(max-width:1120px){.radar-row{grid-template-columns:1fr}}
+  @media(max-width:720px){
+    .main{padding:20px 16px 40px}
+    .head h1{font-size:24px}
+    .head p{font-size:13px}
+    .verdict{padding:18px 18px;gap:14px;margin-bottom:6px}
+    .verdict .badge{width:52px;height:52px;border-radius:14px}
+    .verdict .vt{min-width:0;flex:1 1 100%}
+    .verdict .vt h2{font-size:17px}
+    .verdict .vt p{font-size:13px}
+    .radar-row{padding:16px 14px;gap:6px}
+    .rsum .ri .nm{width:88px;font-size:13px}
+    .kpi,.hl,.adv{padding:16px 16px}
+    .kpi .val{font-size:26px}
+    .redline{padding:18px 16px}
+    .sec{margin:24px 0 12px}
+    .sec h3{font-size:16px}
+    .collapse-btn{top:20px}
+    body:not(.sidebar-collapsed) .collapse-btn{left:calc(min(288px,80vw) - 13px)}
+  }
   @media(max-width:600px){thead{display:none}tbody td{display:block;border:none;padding:4px 18px}tbody tr{display:block;border-bottom:1px solid var(--hair);padding:14px 0}}
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>

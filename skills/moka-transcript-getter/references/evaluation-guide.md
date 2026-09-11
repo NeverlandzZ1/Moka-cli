@@ -58,7 +58,7 @@
 | 尺度把控 | 分寸感在线 | 分寸感在线.png |
 | 反馈体验 | 暖心体验官 | 暖心体验官.png |
 
-  - `{{BADGE_ICON}}` 是 `.verdict .badge` 里 `<img src="icon/{{BADGE_ICON}}">` 引用的**图标 PNG 文件名**——上表是固定映射,加上红线状态的 `本场请注意.png` 共 7 档各对应唯一图标文件,**直接照抄文件名**,不要写 emoji、字符或其他后缀。生成 HTML 时该 `<img>` 会被 upload 脚本改写为 base64 data URL 内联,单文件 HTML 无需外链 `icon/` 目录。
+  - `{{BADGE_ICON}}` 是 `.verdict .badge` 里 `<img src="icon/{{BADGE_ICON}}">` 引用的**图标 PNG 文件名**——上表是固定映射,加上红线状态的 `本场请注意.png` 共 7 档各对应唯一图标文件,**直接照抄文件名**,不要写 emoji、字符或其他后缀。生成 HTML 完成 token 替换后,调 `scripts/inline-badge-icon.mjs` 就地把该 `<img>` 的 `src` 改写为 `data:image/png;base64,...`,单文件 HTML 无需外链 `icon/` 目录。**不要**用 Read + 手工拼 base64 —— Read 拿到的是图像内容不是文本,拼不回去。
   - `{{BADGE_LABEL}}` 是 `.lb` 那行小字 eyebrow:六个正向称号时固定「本场获得称号」;命中红线时改成「本场请注意」,不能沿用"获得称号"的措辞——命中红线不是一项成就。
 
   - `{{BADGE_LINE}}`:一句话(20–35字),写这场里这个维度**具体做对了什么**,带细节、挂得上证据,不是套话。例:

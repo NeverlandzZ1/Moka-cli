@@ -38,10 +38,10 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
-- 飞书云盘上传脚本：`scripts/upload-html-to-drive.mjs`（把面试复盘 HTML 报告上传到当前用户云盘根目录，返回可访问 URL；上传前会自动把模板里的 `<img src="icon/*.png">` 内联成 base64 data URL，云盘 URL 打开即得单文件 HTML，不依赖外部 `icon/` 目录）
 - 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列）
 - 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
-- 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`；其中 `{{BADGE_ICON}}` 填 PNG 文件名，由 upload 脚本 base64 内联）
+- Badge PNG 内联脚本：`scripts/inline-badge-icon.mjs`（把生成好的 HTML 里 `<img src="icon/xxx.png">` 就地重写为 `data:image/png;base64,...`，供 artifact 发布用；必调,不要试图靠 Claude 手工内联）
+- 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`；其中 `{{BADGE_ICON}}` 填 PNG 文件名，替换 token 时由当前 Claude 就地把 `<img src="icon/*.png">` 内联为 base64 data URL）
 - 模板 Logo：`assets/logo.png`
 - 复盘称号图标目录：`assets/icon/`（7 张 PNG：`破冰高手.png`、`灵魂提问官.png`、`最佳听众.png`、`追问达人.png`、`分寸感在线.png`、`暖心体验官.png`、`本场请注意.png`；`{{BADGE_ICON}}` 只能从这 7 个文件名里选）
 - 脚本契约：`references/lark-base-write.md`
@@ -279,7 +279,7 @@ opencli moka export-transcripts --offline --output "<绝对输出路径>" --over
 
 ### 2. 共用后处理
 
-导出成功后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + 云盘上传 + 单次 sync + 去重）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
+导出成功后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + artifact 发布 + 单次 sync + 去重）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
 
 ## 定时采集入口 · 全模式
 
@@ -299,9 +299,9 @@ opencli moka status -f json
 
 lark-cli 授权失效的场景不在本步骤主动预检，交给 sync/dedup 脚本自然报错后中断。
 
-**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup、云盘上传脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
+**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup 等脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/upload-html-to-drive.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，HTML 上传由 upload 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表，也禁止直接调用 `lark-cli drive +upload`。维护脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`、`scripts/inline-badge-icon.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，面试官(人员)回填由 backfill 脚本执行,报告 HTML 的 badge PNG base64 内联由 inline-badge-icon 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 报告不再走飞书云盘,改由当前 Claude 就地打包成自包含单文件 artifact 并发布,拿到公开 URL 后写入 `record.reviewReportUrl`。维护脚本时才读取 `references/lark-base-write.md`。
 
 ### 2. 校招：覆盖导出
 
@@ -331,7 +331,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 
 ### 4. 共用后处理
 
-校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + 云盘上传 + 单次 sync + 去重）。汇总时分别标注校招/社招导出条数、合并后总数。
+校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + artifact 发布 + 单次 sync + 去重）。汇总时分别标注校招/社招导出条数、合并后总数。
 
 ## 共用后处理
 
@@ -342,23 +342,20 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
-- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,原因见 Runbook——Windows 编码兼容,和脱敏无关) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(其中 `{{CANDIDATE}}` / `{{INTERVIEWER}}` 直接填**姓名原文**,不做处理;`{{BADGE_ICON}}` 只能从 `assets/icon/` 下 7 个 PNG 文件名里选(`破冰高手.png` / `灵魂提问官.png` / `最佳听众.png` / `追问达人.png` / `分寸感在线.png` / `暖心体验官.png` / `本场请注意.png`——红线命中固定用最后一个),不要写字符或 emoji;替换完成后 grep `{{[A-Z_]+}}` 应无剩余)。**badge PNG 的 base64 内联由下一步的 upload 脚本自动完成**,当前 Claude 只需填对文件名,不要自己转 base64。
+- 处理的记录:把 `transcript` 写入 OS 临时目录的 `.txt`(**纯 ASCII 文件名**:`transcript-<interviewId>.txt`,原因见 Runbook——Windows 编码兼容,和脱敏无关) → 执行 `python3 "<Skill目录>/scripts/transcript_stats.py" <tmp.txt> --json` 拿统计 → 按 `references/evaluation-guide.md` §2 + `references/red-lines.md` 打 6 维分(精度 0.5,红线维度记 0) → 复制 `assets/report-template.html` 到 `<绝对输出路径所在目录>/reports/review-<interviewId>.html`,替换全部 18 个 `{{TOKEN}}`(其中 `{{CANDIDATE}}` / `{{INTERVIEWER}}` 直接填**姓名原文**,不做处理;`{{BADGE_ICON}}` 只能从 `assets/icon/` 下 7 个 PNG 文件名里选(`破冰高手.png` / `灵魂提问官.png` / `最佳听众.png` / `追问达人.png` / `分寸感在线.png` / `暖心体验官.png` / `本场请注意.png`——红线命中固定用最后一个),不要写字符或 emoji;替换完成后 grep `{{[A-Z_]+}}` 应无剩余) → **执行 `node "<Skill目录>/scripts/inline-badge-icon.mjs" --file "<HTML绝对路径>"` 把 `<img src="icon/xxx.png">` 就地重写为 `data:image/png;base64,...`**,退出码 0 且 stdout `ok:true` 才算成功;失败记 `record.reviewError = "inline-badge-icon failed: <原因>"`,不发布 artifact。**不要**试图用 Read + 手工拼 base64 —— Read 拿到的是图像不是文本,历史上就是这么导致 icon 画不上的。
 - 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
 - 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
 
 **必须原样引用** `interviewer-review` 的脚本(transcript_stats.py)与模板(report-template.html);**严禁**自行改写打分算法或 HTML 模板结构。
 
-### 后处理-2. 上传报告到飞书云盘,回填 URL
+### 后处理-2. 把 HTML 发布为自包含 artifact,回填 URL
 
-对每条**已生成 HTML** 的 record 执行:
+对每条**已生成 HTML** 且已完成 badge base64 内联的 record:
 
-```text
-node "<Skill目录>/scripts/upload-html-to-drive.mjs" --file "<HTML绝对路径>"
-```
-
-若 `lark-cli` 不在默认 PATH,追加 `--lark-cli "<路径>"`。
-
-只有脚本退出码 0 且 stdout JSON `ok == true` 时,把 `url` 写入 `record.reviewReportUrl`。失败: 记 `record.reviewError = "upload failed: <原因>"`,`reviewReportUrl` 不写,该 record 的 HTML 本地保留供人工排查,继续下一条。
+- 当前 Claude 直接把 HTML 文件全文作为**自包含单文件 artifact 发布**,拿到公开访问 URL。**不走飞书云盘**——云盘上传不稳定,已经放弃。
+- 发布前再校验一遍:HTML 里已经不含任何 `<img src="icon/`(全部替换为 data URL)、不含未替换的 `{{TOKEN}}`(header 注释里的字面量除外)。
+- 成功: 把 URL 写入 `record.reviewReportUrl`。
+- 失败: 记 `record.reviewError = "artifact publish failed: <简短原因>"`,`reviewReportUrl` 不写,该 record 的本地 HTML 保留供人工排查,继续下一条。
 
 所有 record 处理完成后,把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`(顶层 CollectionResult 的 `generatedAt` / `source` / `errors` / `stats` 保留原值)。
 
@@ -450,7 +447,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 最后汇报:
 
 - 校招、社招分别是否导出成功、合并后总条数(默认模式入口只汇报默认模式一份)
-- 本次评分成功/失败/跳过的记录数,HTML 云盘上传成功/失败数
+- 本次评分成功/失败/跳过的记录数,HTML artifact 发布成功/失败数
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
 - 面试官(人员)回填结果: `backfilled` / `skipped` / `failed`,若有 `unresolvedNames` 逐个列出(仅姓名,不带 open_id)
@@ -478,9 +475,11 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 # 1. 覆盖导出
 opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json
 
-# 2. 遍历 records[] 评分 + 生成报告 + 上传云盘 + 回填 JSON
-#    (Agent 循环,严格按 references/interviewer-review-workflow.md)
-node "<Skill目录>/scripts/upload-html-to-drive.mjs" --file "<html绝对路径>" --lark-cli "<lark-cli 绝对路径>"
+# 2. 遍历 records[] 评分 + 生成报告 + 内联 badge PNG + 发布 artifact + 回填 JSON
+#    (Agent 循环,严格按 references/interviewer-review-workflow.md;
+#     token 替换后必须调 inline-badge-icon.mjs 处理 badge 图标,
+#     否则 artifact 里 icon 显示不出来)
+node "<Skill目录>/scripts/inline-badge-icon.mjs" --file "<html绝对路径>"
 
 # 3. 单次批量写入(整个流水线只调一次)
 node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<PATH>" --lark-cli "<lark-cli 绝对路径>"
@@ -514,7 +513,8 @@ opencli moka export-transcripts --output "<PATH>" -f json
 | 步骤 | 判定 |
 |---|---|
 | export-transcripts | 退出码 0 且 JSON 顶层 `ok:true` 且 `records.length > 0`(为 0 时汇报"今日无记录",不算失败) |
-| upload-html-to-drive.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `url` 以 `https://` 开头 |
+| inline-badge-icon.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `replaced >= 1`;执行后 HTML 里再无 `src="icon/` |
+| artifact 发布 | 拿到 `https://` 开头的公开 URL 且 HTML 里已完成 badge PNG base64 内联(不再依赖外部 `icon/`) |
 | sync-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true` **并且** `created === deduplicatedRecords` **并且** `failed === 0`。**旧版本 sync 会在有失败时误报 ok:true,新版本已收紧;若字段缺失说明脚本没更新。** |
 | deduplicate-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true`(失败不阻塞汇报,但要在汇总里带上 `failed`/`errors`) |
 | backfill-interviewer-user.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `failed===0`。`unresolvedNames` 可以非空(search-user 找不到的姓名),`skipped` 也可以非空(所有姓名都解析不上的 record),都不算 fatal;把摘要附到汇总即可 |
@@ -539,13 +539,13 @@ opencli moka export-transcripts --output "<PATH>" -f json
 | `node "scripts/xxx.mjs"` 找不到脚本 | 宿主 execScript 的 cwd 不在 skill 目录 | **一律用绝对路径** `node "<Skill目录>/scripts/xxx.mjs"`。共同前置第 1 步就是干这个的 |
 | 手误 `D:` 打成 `E:` | 无 | 每一次 execScript 之前肉眼核对盘符 |
 
-### 云盘上传阶段
+### Artifact 发布阶段
 
 | 现象 | 根因 | 处置 |
 |---|---|---|
-| `lark-cli drive +upload` 报 `unsafe file path: must be a relative path within the current directory` | 直接把绝对路径喂给了 lark-cli | **只调 `upload-html-to-drive.mjs`,不要自己拼 `lark-cli drive +upload`**——脚本已在内部 chdir 到 HTML 目录并传相对文件名 |
 | 报告文件名带 `**` 或中文,`Errno 22 Invalid argument` | Windows 文件名禁用 `**`,中文在部分 Node/Python 版本上编码不稳 | 报告/临时文件名**只用 ASCII**:`review-<interviewId>.html`、`transcript-<interviewId>.txt`。候选人姓名放在 **HTML 内容里**即可,不进文件名(纯技术原因,不是脱敏要求) |
-| upload 成功但拿不到 URL | lark-cli 输出格式变了,`file_token` 不在预期位置 | 查 `upload-html-to-drive.mjs` 的 `extractFileToken()`,追加新的取值路径;不要绕开脚本 |
+| 打开 artifact URL 后 badge 图标是"图片破损" | 生成 HTML 时忘了调 `inline-badge-icon.mjs`,`<img src="icon/xxx.png">` 没被换成 `data:image/png;base64,...` | artifact 是自包含单文件,取不到旁边的 `icon/` 目录。**必须**在发布前跑 `node "<Skill目录>/scripts/inline-badge-icon.mjs" --file "<HTML>"`;**不要**用 Read + 手工拼 base64——Read 拿到的是图像内容,不是 base64 文本,历史踩坑就是这个 |
+| HTML 里残留 `{{TOKEN}}` | 有 token 未替换 | 发布前 grep `{{[A-Z_]+}}`,除模板 header 注释里的字面量,不应有剩余;有剩余就补齐再发布 |
 
 ### Base 写入阶段(最容易掉链子)
 
@@ -578,7 +578,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 
 - [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
-- [ ] **不直接调 `lark-cli`** 写入、上传、删除——只调 skill 提供的 4 个 `.mjs`(sync / dedup / upload-html-to-drive / backfill-interviewer-user)。
+- [ ] **不直接调 `lark-cli`** 写入、删除——只调 skill 提供的 4 个 `.mjs`(sync / dedup / backfill-interviewer-user / inline-badge-icon)。HTML 报告不再走飞书云盘,改为当前 Claude 就地发布 artifact;发布前必须先调 `inline-badge-icon.mjs`,否则 icon 会画不上。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
 - [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),姓名放在 HTML 内容里(纯技术兼容要求,不是脱敏)。
 - [ ] 大 JSON 结构探查用 `node -e` / `python -c`,不用 `grep` / `Read` 硬碰。
