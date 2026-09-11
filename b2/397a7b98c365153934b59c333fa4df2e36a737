@@ -1,0 +1,47 @@
+skills/moka-transcript-getter/references/evaluation-guide.md
+  s_9d988f2c5f030f::t_7b943952ed86d1 61
+skills/moka-transcript-getter/scripts/inline-badge-icon.mjs
+  s_9d988f2c5f030f::t_f52f2ab644db74 4-5,7-8,10,12-15,17-19,22,26-27,30-38,43-45,48-51,53,55-57,60-67,69-72,75-80,84-89,92-93,95-99,101-102,106-108,111-120,123
+skills/moka-transcript-getter/assets/report-template.html
+  s_9d988f2c5f030f::t_b404e2ad84825d 210-228
+  s_9d988f2c5f030f::t_28dca7b93887bc 204
+skills/moka-transcript-getter/references/interviewer-review-workflow.md
+  s_9d988f2c5f030f::t_328d837b2f592b 3
+  s_9d988f2c5f030f::t_fd9cc6d379e184 20
+  s_9d988f2c5f030f::t_ec74e007c12331 102,104-105
+  s_9d988f2c5f030f::t_495115118e62db 86,88-93
+  s_9d988f2c5f030f::t_004ed0b2ca46ca 77,79-84
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_bd8fdd46b2ac4f 516
+  s_9d988f2c5f030f::t_b4e62f8fc62c22 282
+  s_9d988f2c5f030f::t_25eb2057fc50f0 334
+  s_9d988f2c5f030f::t_cfba58dceb5eb2 450
+  s_9d988f2c5f030f::t_abf1b9566a9f59 302
+  s_9d988f2c5f030f::t_b9cf3a2270025a 44
+  s_9d988f2c5f030f::t_ac77a4edf0b7a4 480-482
+  s_9d988f2c5f030f::t_5fc3819b12ee38 581
+  s_9d988f2c5f030f::t_e596a2292452a5 478-479
+  s_9d988f2c5f030f::t_796476840d85ae 351,353,355-358
+  s_9d988f2c5f030f::t_f500fdc272efa1 304
+  s_9d988f2c5f030f::t_48fedb4a684f3f 542,548
+  s_9d988f2c5f030f::t_a8ba1e67b239fc 43
+  s_9d988f2c5f030f::t_a6f793d60f5cdf 345
+  s_9d988f2c5f030f::t_b867251ee7506c 517
+  s_9d988f2c5f030f::t_853f95fce3e77f 547
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.44-trip",
+  "base_commit_sha": "b2397a7b98c365153934b59c333fa4df2e36a737",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "arn:aws:bedrock:us-west-2:456197019624:application-inference-profile/bumrjndkqzw8"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
