@@ -1,0 +1,20 @@
+skills/moka-transcript-getter/SKILL.md
+  s_9d988f2c5f030f::t_ce4af5b6248d82 201
+  s_9d988f2c5f030f::t_954ba31eff38fb 182,184,186-193,195,197,202,204,206,208,216,218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.44-trip",
+  "base_commit_sha": "596abf2e8f21efeccad20c7df5679cb2501153b2",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "ep-bpcl3tow"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
