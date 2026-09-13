@@ -1,22 +1,16 @@
 #!/usr/bin/env node
 
 /**
- * inline-badge-icon.mjs — 把已生成的 HTML 报告里 `<img src="icon/xxx.png">`
- * 就地改写为 `<img src="data:image/png;base64,...">`,确保 artifact 发布后是自包含单文件。
+ * inline-badge-icon.mjs
  *
- * 用法:
- *   node inline-badge-icon.mjs --file <html绝对路径> [--icon-dir <assets/icon 目录绝对路径>]
+ * 把 HTML 报告里的 <img src="icon/xxx.svg"> 和 <img src="logo.svg">
+ * 就地替换为内联 <svg> 元素,确保 artifact 发布后是自包含单文件。
  *
- * 默认 icon-dir = <脚本所在目录>/../assets/icon。
+ * SVG 文件内容是多行的,内联后不会产生超长单行,
+ * 确保 readFile 能完整读取最终 HTML。
  *
- * stdout 输出一行 JSON: { ok, file, badgeIcon, iconPath, byteCount, replaced }
- *   - ok: 是否成功
- *   - badgeIcon: 从 HTML 里识别出的 PNG 文件名
- *   - replaced: 实际替换的 `src="icon/xxx.png"` 出现次数
- *
- * 退出码: 0 = 成功;非 0 = 失败(HTML 不含 icon/ 前缀 / PNG 找不到 / 写入失败)。
- *
- * 此脚本只做确定性字符串替换,不解析 HTML,不改动 token,不动 CSS。
+ * Usage:
+ *   node inline-badge-icon.mjs --file <html> [--icon-dir <dir>] [--assets-dir <dir>]
  */
 
 import { promises as fs } from "node:fs";
@@ -25,99 +19,130 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ICON_DIR = path.resolve(__dirname, "..", "assets", "icon");
+const DEFAULT_ASSETS_DIR = path.resolve(__dirname, "..", "assets");
 
 function parseArgs(argv) {
-  const out = { file: null, iconDir: DEFAULT_ICON_DIR };
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
+  var out = { file: null, iconDir: DEFAULT_ICON_DIR, assetsDir: DEFAULT_ASSETS_DIR };
+  for (var i = 2; i < argv.length; i++) {
+    var a = argv[i];
     if (a === "--file") out.file = argv[++i];
     else if (a === "--icon-dir") out.iconDir = argv[++i];
+    else if (a === "--assets-dir") out.assetsDir = argv[++i];
     else if (a === "-h" || a === "--help") {
-      console.log("Usage: node inline-badge-icon.mjs --file <html> [--icon-dir <dir>]");
+      console.log("Usage: node inline-badge-icon.mjs --file <html> [--icon-dir <dir>] [--assets-dir <dir>]");
       process.exit(0);
     }
   }
   return out;
 }
 
-function fail(msg, extra = {}) {
-  process.stdout.write(JSON.stringify({ ok: false, error: msg, ...extra }) + "\n");
+function fail(msg, extra) {
+  process.stdout.write(JSON.stringify(Object.assign({ ok: false, error: msg }, extra || {})) + "\n");
   process.exit(1);
 }
 
-async function main() {
-  const { file, iconDir } = parseArgs(process.argv);
-  if (!file) fail("missing --file <html-path>");
-  const absHtml = path.resolve(file);
+function makeInlineSvg(svgText, classAttr) {
+  var svgStart = svgText.indexOf("<svg");
+  if (svgStart === -1) return null;
+  var svgEnd = svgText.lastIndexOf("</svg>") + 6;
+  var svgEl = svgText.substring(svgStart, svgEnd);
+  if (classAttr) {
+    svgEl = svgEl.replace(/<svg /, "<svg class=\"" + classAttr + "\" ");
+  }
+  return svgEl;
+}
 
-  let html;
+async function main() {
+  var args = parseArgs(process.argv);
+  if (!args.file) fail("missing --file <html-path>");
+  var absHtml = path.resolve(args.file);
+
+  var html;
   try {
     html = await fs.readFile(absHtml, "utf8");
   } catch (e) {
-    fail(`read html failed: ${e.message}`, { file: absHtml });
+    fail("read html failed: " + e.message, { file: absHtml });
   }
 
-  // 匹配 <img ... src="icon/<basename>.png" ...>,提取 basename.png
-  // 只认 icon/ 前缀,双引号或单引号都支持;不吃跨行。
-  const re = /<img\b([^>]*?)\bsrc\s*=\s*["']icon\/([^"'\/]+\.png)["']([^>]*)>/gi;
-  const hits = [];
-  html.replace(re, (m, pre, name, post) => {
-    hits.push(name);
+  var replaced = 0;
+  var badgeIcon = null;
+  var iconPath = null;
+  var byteCount = 0;
+
+  // Step 1: inline badge icon
+  var badgeRe = /<img\b([^>]*?)\bsrc\s*=\s*["']icon\/([^"'\/]+\.svg)["']([^>]*)>/gi;
+  var badgeHits = [];
+  html.replace(badgeRe, function(m, pre, name, post) {
+    badgeHits.push(name);
     return m;
   });
 
-  if (hits.length === 0) {
-    fail("no <img src=\"icon/*.png\"> found in HTML — 检查 BADGE_ICON token 是否已替换", {
-      file: absHtml,
+  if (badgeHits.length > 0) {
+    badgeIcon = badgeHits[0];
+    iconPath = path.resolve(args.iconDir, badgeIcon);
+    var svgText;
+    try {
+      svgText = await fs.readFile(iconPath, "utf8");
+      byteCount = svgText.length;
+    } catch (e) {
+      fail("read icon SVG failed: " + e.message, { iconPath: iconPath, badgeIcon: badgeIcon });
+    }
+
+    html = html.replace(badgeRe, function(m, pre, name, post) {
+      var classMatch = (pre + post).match(/class\s*=\s*["']([^"']+)["']/);
+      var classAttr = classMatch ? classMatch[1] : "";
+      var inline = makeInlineSvg(svgText, classAttr);
+      if (inline) {
+        replaced += 1;
+        return inline;
+      }
+      return m;
     });
   }
 
-  // 所有命中的 PNG 文件名应当一致(模板里只有一处 badge img);容忍多处但用同一文件
-  const badgeIcon = hits[0];
-  const inconsistent = hits.find((n) => n !== badgeIcon);
-  if (inconsistent) {
-    fail(`multiple different icon filenames found: ${JSON.stringify([...new Set(hits)])}`, {
-      file: absHtml,
+  // Step 2: inline logo
+  var logoRe = /<img\b([^>]*?)\bsrc\s*=\s*["']logo\.svg["']([^>]*)>/gi;
+  var logoMatch = html.match(logoRe);
+  if (logoMatch) {
+    var logoPath = path.resolve(args.assetsDir, "logo.svg");
+    var logoSvg;
+    try {
+      logoSvg = await fs.readFile(logoPath, "utf8");
+    } catch (e) {
+      fail("read logo SVG failed: " + e.message, { logoPath: logoPath });
+    }
+    html = html.replace(logoRe, function(m, pre, post) {
+      var classMatch = (pre + post).match(/class\s*=\s*["']([^"']+)["']/);
+      var classAttr = classMatch ? classMatch[1] : "";
+      var inline = makeInlineSvg(logoSvg, classAttr);
+      if (inline) {
+        replaced += 1;
+        return inline;
+      }
+      return m;
     });
   }
-
-  const iconPath = path.resolve(iconDir, badgeIcon);
-  let png;
-  try {
-    png = await fs.readFile(iconPath);
-  } catch (e) {
-    fail(`read icon PNG failed: ${e.message}`, { iconPath, badgeIcon });
-  }
-
-  const b64 = png.toString("base64");
-  const dataUrl = `data:image/png;base64,${b64}`;
-
-  let replaced = 0;
-  const newHtml = html.replace(re, (m, pre, name, post) => {
-    replaced += 1;
-    return `<img${pre}src="${dataUrl}"${post}>`;
-  });
 
   if (replaced === 0) {
-    fail("replace produced 0 substitutions — regex mismatch bug", { file: absHtml });
+    fail("no SVG img tags found in HTML", { file: absHtml });
   }
 
   try {
-    await fs.writeFile(absHtml, newHtml, "utf8");
+    await fs.writeFile(absHtml, html, "utf8");
   } catch (e) {
-    fail(`write html failed: ${e.message}`, { file: absHtml });
+    fail("write html failed: " + e.message, { file: absHtml });
   }
 
-  process.stdout.write(
-    JSON.stringify({
-      ok: true,
-      file: absHtml,
-      badgeIcon,
-      iconPath,
-      byteCount: png.length,
-      replaced,
-    }) + "\n"
-  );
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    file: absHtml,
+    badgeIcon: badgeIcon || "logo.svg",
+    iconPath: iconPath || path.resolve(args.assetsDir, "logo.svg"),
+    byteCount: byteCount,
+    replaced: replaced
+  }) + "\n");
 }
 
-main().catch((e) => fail(`unexpected: ${e && e.message ? e.message : String(e)}`));
+main().catch(function(e) {
+  fail("unexpected: " + (e && e.message ? e.message : String(e)));
+});
