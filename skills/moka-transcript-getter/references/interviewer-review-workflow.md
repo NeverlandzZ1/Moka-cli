@@ -3,7 +3,7 @@
 本文件供 `moka-transcript-getter` skill 的定时入口第 2 段(每场评分 + 生成 HTML + 发布 artifact + 回填 JSON)使用。当前 Claude 在这一段里对每条 `record` 直接评分、生成报告、把 HTML 打包为自包含单文件 artifact 并发布,不启动 headless 子进程,不再走飞书云盘。
 
 - 评分与写作的**详细 rubric、锚点、话术**在同目录 [`evaluation-guide.md`](evaluation-guide.md)、[`interview-toolkit.md`](interview-toolkit.md)、[`red-lines.md`](red-lines.md);本文件不重复,只列执行契约。
-- 模板文件:[`../assets/report-template.html`](../assets/report-template.html) 与 [`../assets/logo.svg`](../assets/logo.svg)。
+- 模板文件:[`../assets/report-template.html`](../assets/report-template.html) 与 [`../assets/logo.png`](../assets/logo.png)。
 - 统计脚本:[`../scripts/transcript_stats.py`](../scripts/transcript_stats.py)。
 - **报告生成脚本(一键)**:[`../scripts/generate-report.mjs`](../scripts/generate-report.mjs)。
 
@@ -73,7 +73,7 @@
 | `{{DIRECTION}}` | 岗位名称 | `record.jobTitle` |
 | `{{DIRECTION_FULL}}` | 完整岗位 | `record.jobTitle` |
 | `{{DURATION_CN}}` | 中文时长 | 从 stats 的 `span.duration_min` 换算 |
-| `{{BADGE_ICON}}` | 图标 SVG 文件名 | 从 7 个 SVG 里选,脚本自动确定 |
+| `{{BADGE_ICON}}` | 图标 PNG 文件名 | 从 7 个 PNG 里选,脚本自动确定 |
 | `{{BADGE_LABEL}}` | 「本场获得称号」或「本场请注意」 | 脚本自动确定 |
 | `{{BADGE_NAME}}` | 称号名或「涉及XX问题」 | 脚本自动确定 |
 | `{{BADGE_LINE}}` | 20–35 字亮点/红线陈述 | Agent 通过 `--badge-line` 传入 |

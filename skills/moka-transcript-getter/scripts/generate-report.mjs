@@ -25,7 +25,7 @@
  *   1. 从 --json 读取 record 元数据(candidateName, interviewerNames, jobTitle, roundName, startTime)
  *   2. 把 transcript 写入临时 txt,调 transcript_stats.py 拿统计
  *   3. 复制模板,替换全部 18 个 token
- *   4. 调 inline-badge-icon.mjs 内联 SVG
+ *   4. 调 inline-badge-icon.mjs 把 PNG 换成 base64 data URI
  *   5. 校验:无残留 token,无 src="icon/
  *   6. 输出 JSON: { ok, htmlPath, stats }
  *
@@ -177,18 +177,18 @@ function genAdvice(ads) {
 function getBadgeInfo(scores, redLineHits) {
   if (redLineHits && redLineHits.length > 0) {
     return {
-      icon: "本场请注意.svg",
+      icon: "本场请注意.png",
       label: "本场请注意",
       name: "涉及" + redLineHits.join("、") + "问题",
     };
   }
   var dims = [
-    { key: "openingFlow", badge: "破冰高手", icon: "破冰高手.svg" },
-    { key: "questionQuality", badge: "灵魂提问官", icon: "灵魂提问官.svg" },
-    { key: "listening", badge: "最佳听众", icon: "最佳听众.svg" },
-    { key: "followUpDepth", badge: "追问达人", icon: "追问达人.svg" },
-    { key: "scaleControl", badge: "分寸感在线", icon: "分寸感在线.svg" },
-    { key: "feedbackExperience", badge: "暖心体验官", icon: "暖心体验官.svg" }
+    { key: "openingFlow", badge: "破冰高手", icon: "破冰高手.png" },
+    { key: "questionQuality", badge: "灵魂提问官", icon: "灵魂提问官.png" },
+    { key: "listening", badge: "最佳听众", icon: "最佳听众.png" },
+    { key: "followUpDepth", badge: "追问达人", icon: "追问达人.png" },
+    { key: "scaleControl", badge: "分寸感在线", icon: "分寸感在线.png" },
+    { key: "feedbackExperience", badge: "暖心体验官", icon: "暖心体验官.png" }
   ];
   var best = dims[0];
   for (var i = 0; i < dims.length; i++) {

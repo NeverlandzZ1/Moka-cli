@@ -13,8 +13,10 @@
   其余 3 张（面试官/候选人说话占比、提问结构）保留进度条，口径见 evaluation-guide §4
   （2026-08-24 会议要求砍掉了"最长单段发言"这张）。
   称号：不分层级，是"这场六维里哪个维度最亮眼"，**只在正文顶部 .verdict 区块出现一次**
-  （侧栏不再重复展示）——{{BADGE_ICON}} 填 `.badge` 里的**图标图片文件名**（不是文字缩写，是固定
-  映射的单个符号：破冰高手⚑ / 灵魂提问官? / 最佳听众≈ / 追问达人◎ / 分寸感在线⚖ / 暖心体验官♥ /
+  （侧栏不再重复展示）——{{BADGE_ICON}} 填 `.badge` 里的**图标图片文件名**（**PNG 文件名**,如
+  `破冰高手.png`;原来是 SVG,2026-09-14 换成尺寸极小的 PNG,`inline-badge-icon.mjs` 会读入
+  PNG 转 base64 就地内联到 `<img src>`）;不是文字缩写,是固定映射的单个符号:破冰高手⚑ /
+  灵魂提问官? / 最佳听众≈ / 追问达人◎ / 分寸感在线⚖ / 暖心体验官♥ /
   案件待复核▦，映射表见 evaluation-guide §3，不用自己现想）；{{BADGE_LABEL}} 填 `.lb` 那行小字
   eyebrow，六个正向称号时固定是「本场获得称号」；{{BADGE_NAME}} 当 h2 标题——六个正向称号时
   填称号全名（破冰高手/灵魂提问官/最佳听众/追问达人/分寸感在线/暖心体验官），命中红线时**不再是
@@ -28,7 +30,7 @@
   不再有 GRADE / GRADE_BAND / SCORE / VERDICT_TITLE / VERDICT_DESC / JUDGE_TAG 这几个 token，
   报告任何位置都不出现字母评级、0–100 分数，也不出现"最大短板"这类评价性结论句
   （2026-08-24、2026-08-31 会议/用户反馈要求，避免面试官把复盘读成对自己的评价）。命中合规红线时
-  {{BADGE_ICON}} 固定填「本场请注意.svg」，{{BADGE_LABEL}}/{{BADGE_NAME}} 填「本场请注意」/「涉及XX问题」
+  {{BADGE_ICON}} 固定填「本场请注意.png」，{{BADGE_LABEL}}/{{BADGE_NAME}} 填「本场请注意」/「涉及XX问题」
   （XX 按实际命中的红线类别填，不是固定字符串），{{BADGE_LINE}} 客观说明触碰了
   哪条红线，不套用其余六个亮点称号。命中合规红线（red-lines §1–§9）的条目用独立的 `.redline`
   卡片单独醒目列出（红色调，不是普通 `.card` 的蓝白玻璃），插在「可以更好的地方」table **上方**，
@@ -59,12 +61,13 @@
   不再需要手动断点改列数，填 KPI_CARDS/HIGHLIGHT_CARDS/ADVICE_CARDS 时数量可以不是整除
   列数也没关系。**`.radar-row`（雷达图+六维小结）故意没改**，保持固定比例两栏，1120px 断点
   仍按原样叠成一栏——这条线是用户明确要求保留的,不要顺手也给它套自适应。
-  品牌 logo（2026-08-31 追加）：`.brand .ic` 从文字"复"换成了真实 logo 图片
-  （源文件 `interview-feedback/logo.svg`，六边形+双人对坐+台阶+上升箭头，寓意"面试官成长"），
-  已裁掉原图四周留白、把背景抠成透明、缩到 240px 宽后转 base64 内联进这个 `<img>`，
-  不依赖外部文件路径，报告仍是自包含单文件。以后要换 logo，重新跑一遍"裁边+抠透明背景+
-  base64"这套流程替换这个 data URI 就行，不要直接塞原始 1254×1254 的 logo.svg 进去
-  （太大、四周留白也没抠掉）。
+  品牌 logo（2026-08-31 追加,2026-09-14 更新）：`.brand .ic` 是真实 logo 图片,
+  当前用 PNG (`assets/logo.png`),原来是 SVG——PNG 已经缩小到极小体积
+  (~7 KB),内联为 base64 data URI 后 HTML 单文件大小完全可以接受,发布 artifact
+  自包含没有问题。**替换流程改为:PNG 就地读入 → base64 → 拼 `data:image/png;base64,...`
+  data URI → 就地替换 `<img src="logo.png">` 的 src 属性**(不再是 SVG 那种把
+  `<img>` 标签整个替成 `<svg>` 元素)。以后要换 logo,重新裁边+抠透明背景+
+  重压尺寸后覆盖 `assets/logo.png` 即可,不要塞回原始 1254×1254 的大图。
   质感优化（2026-08-31 追加）：① `nav` 原来 `margin-top:auto` 会把导航硬推到侧栏最底部，
   自从 gcard/sfoot 被拿掉之后侧栏内容变少，中间会拖出一大块难看的空白——已经去掉这个
   auto-margin，nav 现在紧跟在 meta 下面，多余空间正常留在侧栏最下方（这是预期的、
@@ -233,7 +236,7 @@
 <body>
   <button class="collapse-btn" id="collapseBtn" type="button" aria-label="收起侧边栏" aria-expanded="true"><span class="ci">‹</span></button>
   <aside class="sidebar" id="sidebar">
-    <div class="brand"><img class="ic" src="logo.svg" alt="面试官赋能系统"><div><b>面试官赋能系统</b><span>面试复盘报告</span></div></div>
+    <div class="brand"><img class="ic" src="logo.png" alt="面试官赋能系统"><div><b>面试官赋能系统</b><span>面试复盘报告</span></div></div>
     <div class="prof"><div class="av">{{INTERVIEWER_INITIAL}}</div><div class="nm"><b>{{INTERVIEWER}}</b><span>本场面试官</span></div></div>
     <div class="meta">
       <div class="r"><span>候选人</span><b>{{CANDIDATE}}</b></div>

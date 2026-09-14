@@ -41,10 +41,10 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列）
 - 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
 - 报告一键生成脚本：`scripts/generate-report.mjs`（封装"复制模板 → 替换 18 个 token → 跑 transcript_stats.py → 跑 inline-badge-icon → 校验 → 输出 HTML"全流程；Agent 只需打分+传参,不要手写 HTML 或临时脚本）
-- Badge SVG 内联脚本：`scripts/inline-badge-icon.mjs`（把 HTML 里 `<img src="icon/xxx.svg">` 和 `<img src="logo.svg">` 就地替换为内联 `<svg>` 元素，供 artifact 发布用；由 `generate-report.mjs` 自动调用,Agent 无需单独调）
-- 报告模板：`assets/report-template.html`（六维复盘 HTML，含 18 个 `{{TOKEN}}`；logo 和 badge icon 均引用 `.svg` 文件，由 `inline-badge-icon.mjs` 内联）
-- 模板 Logo：`assets/logo.svg`
-- 复盘称号图标目录：`assets/icon/`（7 个 SVG：`破冰高手.svg`、`灵魂提问官.svg`、`最佳听众.svg`、`追问达人.svg`、`分寸感在线.svg`、`暖心体验官.svg`、`本场请注意.svg`；`{{BADGE_ICON}}` 只能从这 7 个文件名里选）
+- Badge PNG base64 内联脚本:`scripts/inline-badge-icon.mjs`(把 HTML 里 `<img src="icon/xxx.png">` 和 `<img src="logo.png">` 的 `src` 就地替换为 `data:image/png;base64,...`,让 artifact 发布后浏览器不再依赖旁边的 icon/ 目录;由 `generate-report.mjs` 自动调用,Agent 无需单独调)
+- 报告模板:`assets/report-template.html`(六维复盘 HTML,含 18 个 `{{TOKEN}}`;logo 和 badge icon 均引用 `.png` 文件,由 `inline-badge-icon.mjs` 内联为 base64)
+- 模板 Logo:`assets/logo.png`
+- 复盘称号图标目录:`assets/icon/`(7 个极小的 PNG:`破冰高手.png`、`灵魂提问官.png`、`最佳听众.png`、`追问达人.png`、`分寸感在线.png`、`暖心体验官.png`、`本场请注意.png`;`{{BADGE_ICON}}` 只能从这 7 个文件名里选)
 - 脚本契约：`references/lark-base-write.md`
 - 评分与报告执行契约：`references/interviewer-review-workflow.md`
 - 评分锚点与话术：`references/evaluation-guide.md`、`references/interview-toolkit.md`、`references/red-lines.md`
@@ -365,7 +365,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
-- 处理的记录:Agent 读逐字稿打 6 维分(精度 0.5,红线维度记 0) → 把评分数据传给 `generate-report.mjs`,脚本自动完成:写临时 txt → 跑 `transcript_stats.py` → 复制模板 → 替换全部 18 个 `{{TOKEN}}` → 跑 `inline-badge-icon.mjs` 内联 SVG → 校验无残留 → 输出 HTML 路径。**禁止手写 HTML 片段、手写 JSON 配置、手写临时 Node 脚本来生成报告**。
+- 处理的记录:Agent 读逐字稿打 6 维分(精度 0.5,红线维度记 0) → 把评分数据传给 `generate-report.mjs`,脚本自动完成:写临时 txt → 跑 `transcript_stats.py` → 复制模板 → 替换全部 18 个 `{{TOKEN}}` → 跑 `inline-badge-icon.mjs` 把 PNG 换成 base64 data URI → 校验无残留 → 输出 HTML 路径。**禁止手写 HTML 片段、手写 JSON 配置、手写临时 Node 脚本来生成报告**。
 - 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
 - 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
 
@@ -538,7 +538,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 |---|---|
 | export-transcripts | 退出码 0 且 JSON 顶层 `ok:true` 且 `records.length > 0`(为 0 时汇报"今日无记录",不算失败) |
 | generate-report.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `remainingTokens === 0` 且 `hasIconSrc === false` |
-| artifact 发布 | 拿到 `https://` 开头的公开 URL 且 HTML 里已完成 badge SVG 内联(不再依赖外部 `icon/`) |
+| artifact 发布 | 拿到 `https://` 开头的公开 URL 且 HTML 里已完成 badge PNG base64 内联(不再依赖外部 `icon/`) |
 | sync-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true` **并且** `created === deduplicatedRecords` **并且** `failed === 0`。**旧版本 sync 会在有失败时误报 ok:true,新版本已收紧;若字段缺失说明脚本没更新。** |
 | deduplicate-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true`(失败不阻塞汇报,但要在汇总里带上 `failed`/`errors`) |
 | backfill-interviewer-user.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `failed===0`。`unresolvedNames` 可以非空(search-user 找不到的姓名),`skipped` 也可以非空(所有姓名都解析不上的 record),都不算 fatal;把摘要附到汇总即可 |
@@ -568,7 +568,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 | 现象 | 根因 | 处置 |
 |---|---|---|
 | 报告文件名带 `**` 或中文,`Errno 22 Invalid argument` | Windows 文件名禁用 `**`,中文在部分 Node/Python 版本上编码不稳 | 报告/临时文件名**只用 ASCII**:`review-<interviewId>.html`、`transcript-<interviewId>.txt`。候选人姓名放在 **HTML 内容里**即可,不进文件名(纯技术原因,不是脱敏要求) |
-| 打开 artifact URL 后 badge 图标是"图片破损" | 生成 HTML 时忘了调 `inline-badge-icon.mjs`,`<img src="icon/xxx.svg">` 没被换成 `data:image/png;base64,...` | artifact 是自包含单文件,取不到旁边的 `icon/` 目录。**必须**在发布前跑 `node "<Skill目录>/scripts/inline-badge-icon.mjs" --file "<HTML>"`;**不要**用 Read + 手工拼 base64——Read 拿到的是图像内容,不是 base64 文本,历史踩坑就是这个 |
+| 打开 artifact URL 后 badge 图标是"图片破损" | 生成 HTML 时忘了调 `inline-badge-icon.mjs`,`<img src="icon/xxx.png">` 没被换成 `data:image/png;base64,...` | artifact 是自包含单文件,取不到旁边的 `icon/` 目录。**必须**在发布前跑 `node "<Skill目录>/scripts/inline-badge-icon.mjs" --file "<HTML>"`;**不要**用 Read + 手工拼 base64——Read 拿到的是图像内容,不是 base64 文本,历史踩坑就是这个 |
 | HTML 里残留 `{{TOKEN}}` | 有 token 未替换 | 发布前 grep `{{[A-Z_]+}}`,除模板 header 注释里的字面量,不应有剩余;有剩余就补齐再发布 |
 
 ### Base 写入阶段(最容易掉链子)
