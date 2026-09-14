@@ -38,9 +38,9 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
-- 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列）
+- 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列；**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
 - 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
-- 报告一键生成脚本：`scripts/generate-report.mjs`（封装"复制模板 → 替换 18 个 token → 跑 transcript_stats.py → 校验 → 输出 HTML"全流程；Agent 只需打分+传参,不要手写 HTML 或临时脚本）
+- 报告一键生成脚本：`scripts/generate-report.mjs`（封装"复制模板 → 替换 18 个 token → 跑 transcript_stats.py → 校验 → 输出 HTML"全流程；**已修复 `readJsonArg` 使用 `fsSync` 而非 `fs`(promises) 读取 `--scores-file` 等文件参数的 bug**；Agent 只需打分+传参,不要手写 HTML 或临时脚本）
 - 报告模板:`assets/report-template.html`(六维复盘 HTML,含 18 个 `{{TOKEN}}`;logo 和 badge icon 均为纯 CSS 样式,无外部图片依赖,单文件自包含)
 - 复盘称号:`{{BADGE_ICON}}` 填 CSS 类名后缀(破冰高手/灵魂提问官/最佳听众/追问达人/分寸感在线/暖心体验官/本场请注意),模板内置 7 档 CSS 图标(emoji+渐变背景)
 - 脚本契约：`references/lark-base-write.md`
@@ -374,7 +374,14 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 对每条**已生成 HTML** 的 record:
 
 - 当前 Claude 直接把 HTML 文件全文作为**自包含单文件 artifact 发布**,拿到公开访问 URL。**不走飞书云盘**——云盘上传不稳定,已经放弃。
-- 发布前再校验一遍:HTML 里不含未替换的 `{{TOKEN}}`(header 注释里的字面量除外)。badge 图标和 logo 均为纯 CSS,无外部依赖。
+- **Artifact 发布成功路径**(2026-09-14 验证通过):
+  1. `generate-report.mjs` 产出的 HTML 是纯 CSS 自包含单文件(logo 和 badge 均为 CSS,无外部图片依赖,体积约 15-25KB),所有行均在 8000 字符以内。
+  2. Agent 用 `readFile` 读取完整 HTML 内容(若超过 200 行需分两次读取,拼接后输出)。
+  3. 在对话中用 `<lobeArtifact>` 标签输出完整 HTML(`type="text/html"`,`identifier="review-<interviewId>"`)。
+  4. 调用 `publishArtifact` 工具发布,传入 identifier,获得公开 URL。
+  5. **多份报告可并行发布**:用 `callSubAgent` 并行派发多个子代理,每个子代理读一份 HTML + 输出 artifact + 发布。每个子代理的 timeout 设为 120 秒。
+  6. **artifact 发布后需单独回填 URL 到飞书 Base**:sync 脚本在报告发布前就已跑完,artifact URL 不会自动写入 Base。需在所有 artifact 发布完成后,用 `tripyoyo-feishu-cli` 的 `run` API(`base +record-upsert --json @./file.json`)逐条把 URL 写入「面试复盘报告」列。**必须用 `tripyoyo-feishu-cli` 的 `run` API 调 lark-cli**,不要用 Node `spawn` + `shell:true`(Windows cmd.exe 编码会炸中文字段名)。
+- 发布前再校验一遍:HTML 里不含未替换的 `{{TOKEN}}`(header 注释里的字面量除外)。
 - 成功: 把 URL 写入 `record.reviewReportUrl`。
 - 失败: 记 `record.reviewError = "artifact publish failed: <简短原因>"`,`reviewReportUrl` 不写,该 record 的本地 HTML 保留供人工排查,继续下一条。
 
@@ -447,7 +454,13 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 1. 拿「面试官」text 列 / 「面试官(人员)」user 列 / 「面试ID」三列的 field_id;人员列显示名支持半/全角括号与括号内外空格的容错匹配。
 2. `+record-list --field-id ...` 按行投影拉全表,挑出「面试官 text 有值,但 面试官(人员) user 为空」的记录。
 3. 建 `name → open_id` 映射:先从同表已填充记录里按顺序拆解(要求名字数量 = 人员数量,不匹配的行跳过);缺失的姓名再用 `lark-cli contact +search-user --query <name>` 兜底。
-4. 逐条 `+record-upsert --record-id X --json {"面试官(人员)":[{id:openId}, ...]}`,默认 3 并发。
+4. 逐条 `+record-upsert --record-id X --json @./payload-file.json`,默认 3 并发。
+
+**Windows 兼容修复**(2026-09-14 验证通过,已写入脚本):
+
+- **`search-user` 查询词提取中文名**:Moka 导出的面试官姓名格式为 `Iris Cheng （程冬芳）`,直接传给 `--query` 会因空格被 lark-cli 拆成位置参数报错。脚本现在从括号中提取中文名(如 `程冬芳`)搜索,避免空格问题。无括号时提取连续中文字符。
+- **`runLarkCli` 强制走 @file 模式**:所有 JSON payload(含中文字段名如 `面试官 (人员 )`)一律写入临时文件用 `@./file.json` 引用,不走命令行内联。Windows `spawn` + `shell:true` 会经过 cmd.exe 编码链路,把 UTF-8 中文字段名转成 GBK 导致 `invalid character` 解析错误。
+- **`tripyoyo-feishu-cli` 的 `run` API 是更干净的替代方案**:如果 Agent 需要手动回填(如 artifact URL 回填),应直接用 `tripyoyo-feishu-cli` 的 `run` API 调 `lark-cli base +record-upsert`,它内部以 argv 数组传递参数,绕过 cmd.exe,UTF-8 全程不破坏,连 @file 都不需要。
 
 **成功判定**:退出码 0 且 stdout JSON `ok === true` 且 `failed === 0`。`unresolvedNames` 可以非空——`search-user` 找不到的姓名会挂在里面,不算 fatal,该 record 若还有其他姓名解析成功,人员列会**部分回填**;所有姓名都解析不上的 record 会归到 `skipped`,人员列继续留空。
 
@@ -498,10 +511,20 @@ opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json
 
 # 2. 遍历 records[] 评分 + 生成报告(generate-report.mjs 一键完成) + 发布 artifact + 回填 JSON
 #    Agent 读逐字稿打分,把 scores/highlights/improves/advice 传给脚本
+#    注意:用 wrapper .cjs 脚本从文件读取 JSON 参数传给 generate-report.mjs,避免 --scores-file 的
+#    fs.readFileSync bug 和命令行长度问题
 node "<Skill目录>/scripts/generate-report.mjs" \
   --json "<PATH>" --interview-id "<id>" \
   --scores-file "<scores.json>" --badge-line "..." \
   --highlights-file "<highlights.json>" --improves-file "<improves.json>" --advice-file "<advice.json>"
+
+# 2b. 发布 artifact(每条报告逐个或用 callSubAgent 并行)
+#     读取 HTML → 在对话中输出 <lobeArtifact> 标签 → 调用 publishArtifact → 获得公开 URL
+#     多份报告可用 callSubAgent 并行,每个子代理 timeout 120s
+
+# 2c. 回填 artifact URL 到飞书 Base(所有 artifact 发布完成后)
+#     用 tripyoyo-feishu-cli 的 run API: base +record-upsert --json @./file.json
+#     必须用 run API,不要用 Node spawn + shell:true
 
 # 3. 单次批量写入(整个流水线只调一次)
 node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<PATH>" --lark-cli "<lark-cli 绝对路径>"
@@ -587,6 +610,10 @@ opencli moka export-transcripts --output "<PATH>" -f json
 |---|---|---|
 | `lark-cli.cmd` 直接调,中文字段名走 `\uXXXX` 转义后 field_not_found | Windows 命令行 UTF-8 传参编码链条太脆 | **禁止 Agent 直接调 lark-cli 写数据**。所有写入/删除/上传统一走 skill 提供的 `.mjs` 脚本;它们已经封好了编码、@file、字段兼容 |
 | Python `subprocess.run(lark_cli, encoding='utf-8')` stdout 是空的 | lark-cli 输出是 GBK,Python 强解 UTF-8 报错并把 stdout 吞了 | 别自己起 Python 调 lark-cli;直接调本 skill 的 `.mjs`(内部用 `spawn` + `setEncoding('utf8')` 已经处理) |
+| `backfill-interviewer-user.mjs` 的 `search-user` 报 `positional arguments are not supported` | 姓名格式 `Iris Cheng （程冬芳）` 中的空格被 lark-cli 拆成位置参数 | **已修复**:脚本从括号中提取中文名搜索,不再用完整姓名 |
+| `backfill-interviewer-user.mjs` 的 `record-upsert` 报 `invalid character 'é'` | Windows `spawn` + `shell:true` 经 cmd.exe 编码链路,中文字段名 `面试官 (人员 )` 被转成 GBK | **已修复**:脚本对所有 JSON payload 强制走 `@file` 模式;或用 `tripyoyo-feishu-cli` 的 `run` API 绕过 cmd.exe |
+| `generate-report.mjs` 的 `--scores-file` 报 `fs.readFileSync is not a function` | 脚本 `import { promises as fs }` 但 `readJsonArg` 用了同步 `fs.readFileSync`(promises 模块没有同步 API) | **已修复**:新增 `import fsSync from "node:fs"`,`readJsonArg` 改用 `fsSync.readFileSync` |
+| Artifact `<lobeArtifact>` 标签不被系统捕获,`publishArtifact` 报 `ARTIFACT_NOT_FOUND` | 对话上下文过长导致标签被截断或未被解析 | 在新对话中发布,或用 `callSubAgent` 派发子代理(每个子代理上下文短,标签能被正确捕获);HTML 必须是纯 CSS 自包含(无 base64 图片),体积 ≤30KB |
 
 ### 汇报
 

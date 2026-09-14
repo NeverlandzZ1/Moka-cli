@@ -32,6 +32,7 @@
  */
 
 import { promises as fs } from "node:fs";
+import fsSync from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -95,7 +96,7 @@ function readJsonArg(direct, fileVar, args, varName) {
     catch (e) { fail("Invalid JSON in --" + varName + ": " + e.message); }
   }
   if (fileVar) {
-    try { return JSON.parse(fs.readFileSync(fileVar, "utf8")); }
+    try { return JSON.parse(fsSync.readFileSync(fileVar, "utf8")); }
     catch (e) { fail("Cannot read --" + varName + "-file: " + e.message); }
   }
   return null;

@@ -223,7 +223,10 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 3. **建 `name → open_id` 映射**(两个来源,合并):
    - **来源 A(同表已填充记录)**:遍历所有行,若「面试官」= "张三、李四" 且「面试官(人员)」= `[{id:ou_A},{id:ou_B}]`,且两侧数量一致,按顺序拆解出 `张三→ou_A`、`李四→ou_B`。**数量不一致的行跳过**,记入 `existingSkipped` 但不算 fatal;这防止用户手动改过某一侧导致对不齐。
    - **来源 B(contact +search-user)**:`needing[]` 里所有姓名去重后,凡是来源 A 里没有的,用 `lark-cli contact +search-user --query <name>` 兜底,取第一条 `open_id`。串行,不并发——contact API 一般不慢,并发太高容易限流。
-4. **逐条 upsert**:`+record-upsert --record-id X --json '{"面试官(人员)":[{id:openId1},{id:openId2},...]}'`。默认 3 并发。**不用** `+record-batch-update` — 那是同值批量更新,每条 record 的人员不同,必须逐条。
+   - **Windows 兼容修复**(2026-09-14):`search-user` 的查询词现在从姓名中提取括号内的中文名(如 `Iris Cheng （程冬芳）` → `程冬芳`),避免完整姓名中的空格被 lark-cli 拆成位置参数报错。无括号时提取连续中文字符。
+4. **逐条 upsert**:`+record-upsert --record-id X --json @./payload-file.json`。默认 3 并发。**不用** `+record-batch-update` — 那是同值批量更新,每条 record 的人员不同,必须逐条。
+   - **Windows 兼容修复**(2026-09-14):所有 JSON payload(含中文字段名 `面试官 (人员 )`)现在强制写入临时文件用 `@./file.json` 引用,不走命令行内联。Windows `spawn` + `shell:true` 会经过 cmd.exe 编码链路,把 UTF-8 中文字段名转成 GBK 导致 `invalid character` 解析错误。`@file` 模式让 lark-cli 从 UTF-8 文件读取,绕过编码问题。
+   - **更干净的替代方案**:Agent 手动回填(如 artifact URL 回填)时,直接用 `tripyoyo-feishu-cli` 的 `run` API 调 `lark-cli base +record-upsert`,它内部以 argv 数组传递参数,绕过 cmd.exe,UTF-8 全程不破坏,连 @file 都不需要。
 
 ### 姓名拆分
 
@@ -277,6 +280,9 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 | `existingSkipped` 有条目 | 同表某行「面试官」文本数量 ≠「面试官(人员)」人员数量 | 通常是有人手动改过一侧但没同步另一侧。脚本主动跳过这类行(不敢信任对齐),不影响本次 needing[] 处理;若长期无法收敛,回飞书 Base 手工把不对齐的行改一致 |
 | 人员列显示名找不到唯一列 | Base 上有多列同时归一化到「面试官(人员)」 | 脚本直接报错。回飞书 Base 把重复列改掉,不改脚本 |
 | `+record-upsert` 报"字段类型不匹配" | 有人把「面试官(人员)」列改成了 text 类型 | 回飞书 Base 把该列改回 user(人员)类型,不改脚本 |
+| `search-user` 报 `positional arguments are not supported (got ["Cheng" "（程冬芳）"])` | 姓名中的空格被 lark-cli 拆成位置参数 | **已修复**:脚本从括号中提取中文名搜索,不再用完整姓名 |
+| `record-upsert` 报 `invalid character 'é'` | Windows spawn + shell:true 经 cmd.exe 编码链路,中文字段名被转 GBK | **已修复**:脚本对所有 JSON payload 强制走 @file 模式;或用 `tripyoyo-feishu-cli` 的 `run` API 绕过 cmd.exe |
+| `generate-report.mjs` 的 `--scores-file` 报 `fs.readFileSync is not a function` | 脚本 `import { promises as fs }` 但 `readJsonArg` 用了 `fs.readFileSync`(promises 模块没有同步 API) | **已修复**:新增 `import fsSync from "node:fs"`,`readJsonArg` 改用 `fsSync.readFileSync` |
 | 大批量姓名走 `contact +search-user` 触发限流 | contact API 有 QPS 限制 | 脚本内部已经串行调用 contact,若仍限流,把 `--concurrency` 降到 1(只影响 upsert 阶段);实在解决不了拆分批次跑 |
 
 

@@ -177,7 +177,9 @@ function runLarkCli(command, args, timeoutMs, jsonPayload) {
     let tempFile = null;
     let finalArgs = args;
 
-    if (jsonPayload && jsonPayload.length > MAX_INLINE_JSON) {
+    // Always use @file for JSON payloads to avoid Windows cmd.exe encoding issues
+    // with non-ASCII field names (e.g. 面试官 (人员 ) in the --json payload)
+    if (jsonPayload) {
       const fileName = `lark-payload-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
       tempFile = path.join(process.cwd(), fileName);
       fsSync.writeFileSync(tempFile, jsonPayload, "utf8");
@@ -426,9 +428,22 @@ function buildNameMapFromExisting(rows, textIdx, userIdx) {
 
 // ─── 通过 contact +search-user 补齐姓名 ────────────────────
 async function searchUserByName(config, name) {
+  // Extract Chinese name from inside parentheses if present
+  // e.g. "Iris Cheng （程冬芳）" → "程冬芳"
+  // This avoids Windows cmd.exe splitting on spaces in the full name
+  // which causes "positional arguments are not supported" errors
+  let searchQuery = name;
+  const parenMatch = name.match(/[（(]\s*([^）)]+?)\s*[）)]/);
+  if (parenMatch && parenMatch[1].trim()) {
+    searchQuery = parenMatch[1].trim();
+  } else {
+    // If no parentheses, try to extract just the Chinese characters
+    const cnMatch = name.match(/[\u4e00-\u9fff]+/);
+    if (cnMatch) searchQuery = cnMatch[0];
+  }
   const args = [
     "contact", "+search-user",
-    "--query", name,
+    "--query", searchQuery,
     "--as", "user",
     "--format", "json",
   ];

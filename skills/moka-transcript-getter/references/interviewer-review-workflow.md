@@ -109,6 +109,13 @@ node "<Skill目录>/scripts/generate-report.mjs" \
 - 当前 Claude 直接把 `generate-report.mjs` 输出的 HTML 文件全文作为**自包含单文件 artifact 发布**,拿到公开访问 URL。
 - **不走飞书云盘**——旧方案不稳定,已弃用;URL 依旧写入 `record.reviewReportUrl`,与之前的 Base 「面试复盘报告」列语义一致。
 - HTML 里已无未替换的 `{{TOKEN}}`。badge 和 logo 均为纯 CSS,无外部图片依赖。
+- **Artifact 发布成功路径**(2026-09-14 验证通过):
+  1. `generate-report.mjs` 产出的 HTML 是纯 CSS 自包含单文件(约 15-25KB),所有行均在 8000 字符以内,`readFile` 可完整读取。
+  2. Agent 用 `readFile` 读取完整 HTML(若超过 200 行分两次读取拼接)。
+  3. 在对话中用 `<lobeArtifact>` 标签输出完整 HTML(`type="text/html"`,`identifier="review-<interviewId>"`)。
+  4. 调用 `publishArtifact` 工具发布,获得公开 URL。
+  5. **多份报告可并行发布**:用 `callSubAgent` 派发子代理,每个子代理读一份 HTML + 输出 artifact + 发布,timeout 120s。
+  6. **artifact URL 需单独回填飞书 Base**:sync 在 artifact 发布前就跑了,URL 不会自动写入。发布完成后用 `tripyoyo-feishu-cli` 的 `run` API(`base +record-upsert --json @./file.json`)逐条回填「面试复盘报告」列。
 - 成功: `record.reviewReportUrl = <artifact 公开 URL>`。
 - 失败: `record.reviewError = "artifact publish failed: <简短原因>"`,`reviewReportUrl` 不写,该 record 的本地 HTML 保留供人工排查,继续下一条。
 - 单条评分/发布失败不阻断其余 records。
