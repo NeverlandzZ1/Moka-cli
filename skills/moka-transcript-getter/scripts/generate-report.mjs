@@ -3,7 +3,7 @@
 /**
  * generate-report.mjs — 一键生成面试官复盘 HTML 报告
  *
- * 把"复制模板 → 替换 18 个 token → 跑 inline-badge-icon → 输出 HTML 路径"封装为一个脚本。
+ * 把"复制模板 → 替换 18 个 token → 校验 → 输出 HTML 路径"封装为一个脚本。
  * Agent 只需读逐字稿 + 打分,把评分数据通过 --scores JSON 传入,剩下全自动。
  *
  * 用法:
@@ -25,9 +25,8 @@
  *   1. 从 --json 读取 record 元数据(candidateName, interviewerNames, jobTitle, roundName, startTime)
  *   2. 把 transcript 写入临时 txt,调 transcript_stats.py 拿统计
  *   3. 复制模板,替换全部 18 个 token
- *   4. 调 inline-badge-icon.mjs 把 PNG 换成 base64 data URI
- *   5. 校验:无残留 token,无 src="icon/
- *   6. 输出 JSON: { ok, htmlPath, stats }
+ *   4. 校验:无残留 token
+ *   5. 输出 JSON: { ok, htmlPath, stats }
  *
  * 退出码: 0 = 成功; 非 0 = 失败。
  */
@@ -42,7 +41,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATE = path.resolve(__dirname, "..", "assets", "report-template.html");
 const DEFAULT_PYTHON = process.platform === "win32" ? "python" : "python3";
 const STATS_SCRIPT = path.resolve(__dirname, "transcript_stats.py");
-const INLINE_SCRIPT = path.resolve(__dirname, "inline-badge-icon.mjs");
 
 // ─── 参数解析 ────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -177,18 +175,18 @@ function genAdvice(ads) {
 function getBadgeInfo(scores, redLineHits) {
   if (redLineHits && redLineHits.length > 0) {
     return {
-      icon: "本场请注意.png",
+      icon: "本场请注意",
       label: "本场请注意",
       name: "涉及" + redLineHits.join("、") + "问题",
     };
   }
   var dims = [
-    { key: "openingFlow", badge: "破冰高手", icon: "破冰高手.png" },
-    { key: "questionQuality", badge: "灵魂提问官", icon: "灵魂提问官.png" },
-    { key: "listening", badge: "最佳听众", icon: "最佳听众.png" },
-    { key: "followUpDepth", badge: "追问达人", icon: "追问达人.png" },
-    { key: "scaleControl", badge: "分寸感在线", icon: "分寸感在线.png" },
-    { key: "feedbackExperience", badge: "暖心体验官", icon: "暖心体验官.png" }
+    { key: "openingFlow", badge: "破冰高手", icon: "破冰高手" },
+    { key: "questionQuality", badge: "灵魂提问官", icon: "灵魂提问官" },
+    { key: "listening", badge: "最佳听众", icon: "最佳听众" },
+    { key: "followUpDepth", badge: "追问达人", icon: "追问达人" },
+    { key: "scaleControl", badge: "分寸感在线", icon: "分寸感在线" },
+    { key: "feedbackExperience", badge: "暖心体验官", icon: "暖心体验官" }
   ];
   var best = dims[0];
   for (var i = 0; i < dims.length; i++) {
@@ -319,20 +317,6 @@ async function main() {
   // 写 HTML
   await fs.writeFile(htmlPath, html, "utf8");
 
-  // 调 inline-badge-icon.mjs
-  try {
-    var inlineStdout = execFileSync("node", [INLINE_SCRIPT, "--file", htmlPath], {
-      encoding: "utf8",
-      timeout: 30000
-    });
-    var inlineResult = JSON.parse(inlineStdout);
-    if (!inlineResult.ok) {
-      fail("inline-badge-icon failed: " + (inlineResult.error || "unknown"), { htmlPath: htmlPath });
-    }
-  } catch (e) {
-    fail("inline-badge-icon execution failed: " + (e.stderr || e.message), { htmlPath: htmlPath });
-  }
-
   // 校验: 无残留 token (排除注释里的字面量)
   var finalHtml = await fs.readFile(htmlPath, "utf8");
   var tokenCheck = finalHtml.match(/\{\{[A-Z_]+\}\}/g);
@@ -343,8 +327,8 @@ async function main() {
     return !before.includes("<!--");
   }) : [];
 
-  // 校验: 无 src="icon/
-  var hasIconSrc = finalHtml.indexOf('src="icon/') > -1;
+  // CSS 方案下不再有 src="icon/ 引用，校验保留为 false
+  var hasIconSrc = false;
 
   process.stdout.write(JSON.stringify({
     ok: true,

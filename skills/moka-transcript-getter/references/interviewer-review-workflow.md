@@ -3,13 +3,13 @@
 本文件供 `moka-transcript-getter` skill 的定时入口第 2 段(每场评分 + 生成 HTML + 发布 artifact + 回填 JSON)使用。当前 Claude 在这一段里对每条 `record` 直接评分、生成报告、把 HTML 打包为自包含单文件 artifact 并发布,不启动 headless 子进程,不再走飞书云盘。
 
 - 评分与写作的**详细 rubric、锚点、话术**在同目录 [`evaluation-guide.md`](evaluation-guide.md)、[`interview-toolkit.md`](interview-toolkit.md)、[`red-lines.md`](red-lines.md);本文件不重复,只列执行契约。
-- 模板文件:[`../assets/report-template.html`](../assets/report-template.html) 与 [`../assets/logo.png`](../assets/logo.png)。
+- 模板文件:[`../assets/report-template.html`](../assets/report-template.html)。logo 和 badge 图标均为纯 CSS,无外部图片依赖。
 - 统计脚本:[`../scripts/transcript_stats.py`](../scripts/transcript_stats.py)。
 - **报告生成脚本(一键)**:[`../scripts/generate-report.mjs`](../scripts/generate-report.mjs)。
 
 ## 0. 核心原则:用脚本,不要手写
 
-**禁止 Agent 手写 HTML 片段、手写 JSON 配置文件、手写临时 Node 脚本来生成报告。** 所有"复制模板 → 替换 token → 跑 inline-badge-icon → 输出 HTML"的逻辑已封装在 `scripts/generate-report.mjs` 中。Agent 只需:
+**禁止 Agent 手写 HTML 片段、手写 JSON 配置文件、手写临时 Node 脚本来生成报告。** 所有"复制模板 → 替换 token → 校验 → 输出 HTML"的逻辑已封装在 `scripts/generate-report.mjs` 中。Agent 只需:
 
 1. 读逐字稿(用 `readFile` 分段读,或用 `node` 脚本提取)
 2. 打六维分 + 判红线
@@ -59,7 +59,7 @@
 
 ## 4. 生成 HTML(一键脚本)
 
-调用 `generate-report.mjs`,脚本自动完成:复制模板 → 替换 18 个 token → 跑 inline-badge-icon → 校验无残留 → 输出 HTML 路径。
+调用 `generate-report.mjs`,脚本自动完成:复制模板 → 替换 18 个 token → 校验无残留 → 输出 HTML 路径。
 
 ### 18 个 token
 
@@ -108,7 +108,7 @@ node "<Skill目录>/scripts/generate-report.mjs" \
 
 - 当前 Claude 直接把 `generate-report.mjs` 输出的 HTML 文件全文作为**自包含单文件 artifact 发布**,拿到公开访问 URL。
 - **不走飞书云盘**——旧方案不稳定,已弃用;URL 依旧写入 `record.reviewReportUrl`,与之前的 Base 「面试复盘报告」列语义一致。
-- `generate-report.mjs` 已在内部调了 `inline-badge-icon.mjs`,HTML 里已无 `src="icon/`、无未替换的 `{{TOKEN}}`。
+- HTML 里已无未替换的 `{{TOKEN}}`。badge 和 logo 均为纯 CSS,无外部图片依赖。
 - 成功: `record.reviewReportUrl = <artifact 公开 URL>`。
 - 失败: `record.reviewError = "artifact publish failed: <简短原因>"`,`reviewReportUrl` 不写,该 record 的本地 HTML 保留供人工排查,继续下一条。
 - 单条评分/发布失败不阻断其余 records。
