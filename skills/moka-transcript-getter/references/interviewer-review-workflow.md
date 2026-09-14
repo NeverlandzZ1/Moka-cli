@@ -73,7 +73,7 @@
 | `{{DIRECTION}}` | 岗位名称 | `record.jobTitle` |
 | `{{DIRECTION_FULL}}` | 完整岗位 | `record.jobTitle` |
 | `{{DURATION_CN}}` | 中文时长 | 从 stats 的 `span.duration_min` 换算 |
-| `{{BADGE_ICON}}` | 图标 PNG 文件名 | 从 7 个 PNG 里选,脚本自动确定 |
+| `{{BADGE_ICON}}` | 图标 CSS 类名后缀 | 从 7 档 CSS 类中选,脚本自动确定 |
 | `{{BADGE_LABEL}}` | 「本场获得称号」或「本场请注意」 | 脚本自动确定 |
 | `{{BADGE_NAME}}` | 称号名或「涉及XX问题」 | 脚本自动确定 |
 | `{{BADGE_LINE}}` | 20–35 字亮点/红线陈述 | Agent 通过 `--badge-line` 传入 |
