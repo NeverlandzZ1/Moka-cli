@@ -76,13 +76,13 @@
 | `{{BADGE_ICON}}` | 图标 CSS 类名后缀 | 从 7 档 CSS 类中选,脚本自动确定 |
 | `{{BADGE_LABEL}}` | 「本场获得称号」或「本场请注意」 | 脚本自动确定 |
 | `{{BADGE_NAME}}` | 称号名或「涉及XX问题」 | 脚本自动确定 |
-| `{{BADGE_LINE}}` | 20–35 字亮点/红线陈述 | Agent 通过 `--badge-line` 传入 |
-| `{{KPI_CARDS}}` | 4 张 KPI 卡片 | 脚本从 stats 自动生成 |
-| `{{RADAR_DIMS_JSON}}` | 雷达图 6 维数据 | 脚本从 scores 自动生成 |
-| `{{RADAR_SUMMARY_ROWS}}` | 6 行小结 | 脚本从 scores 自动生成 |
-| `{{HIGHLIGHT_CARDS}}` | 3 张亮点卡片 | Agent 通过 `--highlights` 传入 |
-| `{{IMPROVE_ROWS}}` | 「可以更好的地方」 | Agent 通过 `--improves` 传入 |
-| `{{ADVICE_CARDS}}` | 4 张 next-step 建议 | Agent 通过 `--advice` 传入 |
+| `{{BADGE_LINE}}` | 20–35 字的具体亮点/红线陈述,**必须挂原话证据**,写这场里该维度**具体做对/触碰了什么**,带细节,不是套话 | Agent 通过 `--badge-line` 传入 |
+| `{{KPI_CARDS}}` | 4 张 KPI 卡片 HTML 片段(时长 / 面试官占比 / 追问轮数 / 亮点+红线数量) | 脚本从 stats 自动生成 |
+| `{{RADAR_DIMS_JSON}}` | 雷达图 6 维数据 JSON(不显示分数,只显示形状+档位词) | 脚本从 scores 自动生成 |
+| `{{RADAR_SUMMARY_ROWS}}` | 6 行小结,每行「维度 + 档位词 + 一句证据」 | 脚本从 scores 自动生成 |
+| `{{HIGHLIGHT_CARDS}}` | **3 张**亮点卡片,每张 1 个正向行为 + **原话证据(带时间戳)**,`title` 是行为标签、`rubric` 是对应的六维名、`desc` 是 1–2 句现象描述、`quotes` 至少 1 条原话切片 | Agent 通过 `--highlights` 传入 |
+| `{{IMPROVE_ROWS}}` | **4 条**「可以更好的地方」,每条含**现象 / 影响 / 落地建议**三段式,措辞对事不对人;`title` 是可改进点、`desc` 展开现象+影响+建议、`rubric` 对应六维名、`ts`+`text` 挂**原话证据** | Agent 通过 `--improves` 传入 |
+| `{{ADVICE_CARDS}}` | **4 张** next-step 建议卡,面向**下一场如何调整**,不是复述本场问题;`title` 是动作短句、`desc` 是具体做法(1–2 句可执行) | Agent 通过 `--advice` 传入 |
 
 ### 调用方式
 
@@ -103,6 +103,7 @@ node "<Skill目录>/scripts/generate-report.mjs" \
 
 - 「亮点/可改进」条数用户已定为 3 亮点 + 4 可改进 + 4 next-step;数量不足时也要凑齐,允许弱项复用同一原文证据,不允许空卡片。
 - 打分低的维度必须在「可以更好的地方」有对应条目,打分高的必须在「亮点」有对应条目——雷达和正文互证。
+- 红线情况:除了改 `{{BADGE_*}}` 外,把红线陈述并入 `{{BADGE_LINE}}` 与 `{{IMPROVE_ROWS}}` 首条;红线维度对应的 `{{HIGHLIGHT_CARDS}}` 不发正向卡片,腾出来给其他维度。
 
 ## 5. 打包为 artifact 并发布 + 回填 JSON
 

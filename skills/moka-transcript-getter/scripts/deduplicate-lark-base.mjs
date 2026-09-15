@@ -46,6 +46,11 @@ const DEFAULTS = Object.freeze({
 // 到当前表的字段列表里查真实 field_id（见 resolveFieldIds），不再硬编码。
 const INTERVIEW_ID_FIELD_NAME = "面试ID";
 const APPLICATION_ID_FIELD_NAME = "申请ID";
+// 保留优先级字段:HR 手动维护的「是否已通知」单选(是/否)。同 key 组内取值为
+// 「是」的行胜出;都不是「是」时才退回 created_time 最新那条。
+// 场景:同一场面试写入两次(旧行 HR 已经通知过面试官并把此列标成「是」,
+// 新行是这次刚 sync 出来的空壳),必须保留旧行避免重复通知。
+const NOTIFIED_FIELD_NAME = "是否已通知";
 
 // ─── 错误类型 ────────────────────────────────────────────────
 class DedupError extends Error {
@@ -380,26 +385,49 @@ async function runConcurrent(tasks, concurrency = 3) {
 // ─── 去重逻辑 ────────────────────────────────────────────────
 
 /**
+ * 判断单选字段 "是否已通知" 是否等于 "是"。
+ * 单选列经过 lark-cli 反序列化后可能以下几种形态出现,一并容错:
+ *   - 原始字符串: "是"
+ *   - 单选对象:   { text: "是", ... } 或 { value: "是", ... }
+ *   - 数组包裹:   [ "是" ] / [ { text: "是" } ]
+ * null / 空字符串 / "否" / 其它形态一律视为未通知。
+ */
+function isNotifiedYes(value) {
+  if (value == null) return false;
+  if (Array.isArray(value)) return value.some(isNotifiedYes);
+  if (typeof value === "string") return value.trim() === "是";
+  if (typeof value === "object") {
+    if (typeof value.text === "string" && value.text.trim() === "是") return true;
+    if (typeof value.value === "string" && value.value.trim() === "是") return true;
+    if (typeof value.name === "string" && value.name.trim() === "是") return true;
+  }
+  return false;
+}
+
+/**
  * 面试转写表按「面试ID + 申请ID」联合键去重
  *
- * 保留策略: **保留 record_id 倒序第一条**(即最后写入的、更新鲜的记录)。
- * 早期版本按顺序保留"第一条"→ 结果保留了最早的旧记录(无评分/无 URL),
- * 反而删掉了最新一批带评分和 HTML URL 的记录。实测切换为倒序保留后,
- * 每次 sync 写入的最新记录会稳定保留,旧的空壳记录被清掉。
+ * 保留策略(D-7 更新):
+ *   1. 「是否已通知」= 是 的行优先胜出。这是 HR 手动标注的,表示已经把这场的
+ *      复盘报告发出给面试官了。若同组内存在多条已通知,取其中倒序(最新)一条,
+ *      避免连续误标时留下最早那条无意义的记录。
+ *   2. 组内没有任何行标了「是」时,退回历史行为:倒序取最新一条。
+ *   这样每次 sync 新写入的空壳(默认为「否」)不会覆盖 HR 已通知过的旧行,
+ *   避免重发提醒;而在还没通知过的组里,依旧优先保留最新的评分/报告版本。
  *
- * 未来若飞书 record-list 顺序不能视为写入顺序,应改用 `created_time` 字段排序,
- * 但当前 lark-cli +record-list 默认按 created_time 升序返回,倒序取即可。
+ * lark-cli +record-list 默认按 created_time 升序返回,故倒序遍历 = 最新在前。
  *
  * @returns { keepBy: Map<key, recordId>, toDelete: string[] }
  */
 function deduplicateTranscripts(records, recordIds) {
-  const keepBy = new Map(); // businessKey → recordId (保留的第一条,倒序遍历下即最新一条)
+  const keepBy = new Map(); // businessKey → { recordId, notified }
   const toDelete = [];
 
-  // 倒序遍历:先看到的就是最新的,记入 keepBy;之后再看到同 key 的就是旧的,删掉。
+  // 倒序遍历:同 key 下,先看到的就是最新的。
   for (let i = records.length - 1; i >= 0; i--) {
     const interviewId = records[i][0]; // 面试ID
     const applicationId = records[i][1]; // 申请ID
+    const notified = isNotifiedYes(records[i][2]); // 是否已通知
     const recordId = recordIds[i];
 
     // 跳过没有面试ID或申请ID的空行
@@ -408,15 +436,30 @@ function deduplicateTranscripts(records, recordIds) {
     }
 
     const key = `${applicationId}:${interviewId}`;
+    const kept = keepBy.get(key);
 
-    if (keepBy.has(key)) {
-      toDelete.push(recordId);
+    if (!kept) {
+      keepBy.set(key, { recordId, notified });
+      continue;
+    }
+
+    // 已通知行 vs 未通知行:让已通知行胜出。
+    if (notified && !kept.notified) {
+      // 当前行是已通知,先前保留的是未通知 → 换保留当前行,先前那条改为待删。
+      toDelete.push(kept.recordId);
+      keepBy.set(key, { recordId, notified });
     } else {
-      keepBy.set(key, recordId);
+      // 其余场景(两者同为已通知 / 同为未通知 / 当前是未通知但保留的是已通知)
+      // 都保留 kept,当前行进删除队列。倒序遍历保证 kept 已经是同类中最新的一条。
+      toDelete.push(recordId);
     }
   }
 
-  return { keepBy, toDelete };
+  // 对外契约保持不变:keepBy 值仍为 recordId 字符串。
+  const keepByOut = new Map();
+  for (const [k, v] of keepBy) keepByOut.set(k, v.recordId);
+
+  return { keepBy: keepByOut, toDelete };
 }
 
 // ─── 主流程 ──────────────────────────────────────────────────
@@ -439,16 +482,39 @@ export async function deduplicate(options) {
   };
 
   // ── 步骤1: 按字段名解析出当前表真实的 field_id，再拉全量记录 ──
+  // 必需字段:面试ID + 申请ID(缺任一直接失败,无法去重)
   const fieldIds = await resolveFieldIds(
     config,
     config.transcriptTableId,
     [INTERVIEW_ID_FIELD_NAME, APPLICATION_ID_FIELD_NAME],
   );
-  // 顺序固定：records[i][0]=面试ID, records[i][1]=申请ID（deduplicateTranscripts 依赖此顺序）
+  // 可选字段:是否已通知(HR 手动维护列,可能尚未添加;缺失时降级为老逻辑,倒序取最新)
+  try {
+    const notifiedIds = await resolveFieldIds(
+      config,
+      config.transcriptTableId,
+      [NOTIFIED_FIELD_NAME],
+    );
+    fieldIds[NOTIFIED_FIELD_NAME] = notifiedIds[NOTIFIED_FIELD_NAME];
+  } catch (e) {
+    if (e instanceof DedupError && e.details?.missing?.includes(NOTIFIED_FIELD_NAME)) {
+      console.error(
+        `[dedup] "${NOTIFIED_FIELD_NAME}" 列在当前表不存在,降级为倒序取最新的去重策略。`
+        + `如需已通知优先保留,请在飞书表中添加此单选列(选项 是/否)。`,
+      );
+    } else {
+      throw e;
+    }
+  }
+  // 顺序固定:records[i][0]=面试ID, records[i][1]=申请ID, records[i][2]=是否已通知(可能 undefined)
+  // (deduplicateTranscripts 依赖此顺序)
   const transcriptFields = [
     fieldIds[INTERVIEW_ID_FIELD_NAME],
     fieldIds[APPLICATION_ID_FIELD_NAME],
   ];
+  if (fieldIds[NOTIFIED_FIELD_NAME]) {
+    transcriptFields.push(fieldIds[NOTIFIED_FIELD_NAME]);
+  }
   const transcriptData = await fetchAllRecords(config, config.transcriptTableId, transcriptFields);
   summary.transcripts.before = transcriptData.recordIds.length;
 
