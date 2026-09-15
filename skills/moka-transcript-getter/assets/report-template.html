@@ -190,8 +190,18 @@
   .redline .rl-title{font-size:16px;font-weight:700;color:var(--bad)}
   .redline p{font-size:13.5px;color:var(--text-2);line-height:1.6;margin-bottom:10px;max-width:78ch}
   .redline .ev{background:rgba(224,72,59,.07);padding:8px 12px;border-radius:10px;font-size:12.5px;color:var(--text);line-height:1.5}
-  .redline .ev + .ev{margin-top:6px}
+  .redline .ev + .ev{margin-top:8px}
   .redline .ev .ts{color:var(--bad);font-weight:600;margin-right:7px;font-variant-numeric:tabular-nums}
+  .redline .ev.ctx{padding:10px 12px 10px 12px;display:block}
+  .redline .ev.ctx .ctx-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .redline .ev.ctx .ctx-head .ts{margin-right:0}
+  .redline .ev.ctx .ctx-head .who{font-size:11.5px;color:var(--text-3);font-weight:500}
+  .redline .ev.ctx .ln{display:block;padding:2px 0 2px 8px;color:var(--text-3);border-left:2px solid rgba(224,72,59,.15);font-size:12.5px;line-height:1.55}
+  .redline .ev.ctx .ln + .ln{margin-top:2px}
+  .redline .ev.ctx .ln .sp{font-weight:600;color:var(--text-2);margin-right:5px}
+  .redline .ev.ctx .ln.hit{color:var(--text);border-left-color:var(--bad);background:rgba(224,72,59,.14);padding:4px 8px;border-radius:6px;font-weight:500}
+  .redline .ev.ctx .ln.hit .sp{color:var(--bad)}
+  .redline .ev.ctx .ln mark{background:rgba(224,72,59,.32);color:inherit;padding:1px 3px;border-radius:3px;font-weight:600}
   td .ti{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;margin-bottom:4px}
   td .de{color:var(--text-2);font-size:12.5px;line-height:1.55;max-width:48ch}
   td .rub{font-size:12.5px;color:var(--text-2);white-space:nowrap}
@@ -205,23 +215,50 @@
   .mfoot{margin-top:36px;padding-top:16px;border-top:1px solid var(--hair-soft);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-3)}
   @media(max-width:1120px){.radar-row{grid-template-columns:1fr}}
   @media(max-width:720px){
+    body{display:block}
+    .sidebar{position:fixed;top:0;left:0;height:100vh;z-index:20;transform:translateX(-100%);transition:transform .22s ease,width .22s ease,padding .22s ease;box-shadow:0 8px 40px rgba(20,40,80,.18);width:min(288px,86vw)}
+    .sidebar.mobile-open{transform:translateX(0)}
+    .sidebar.collapsed{width:min(288px,86vw);padding:26px 22px}
+    .sidebar.collapsed .brand{justify-content:flex-start}
+    .sidebar.collapsed .brand b,.sidebar.collapsed .brand span,.sidebar.collapsed .prof .nm,.sidebar.collapsed .meta,.sidebar.collapsed nav{display:block}
+    .sidebar.collapsed .prof{justify-content:flex-start;padding:14px;background:rgba(255,255,255,.5);border:1px solid var(--hair-soft)}
     .main{padding:20px 16px 40px}
-    .head h1{font-size:24px}
-    .head p{font-size:13px}
-    .verdict{padding:18px 18px;gap:14px;margin-bottom:6px}
-    .verdict .badge{width:52px;height:52px;border-radius:14px}
+    .collapse-btn{position:fixed;top:14px;left:14px;width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,.9);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
+    .collapse-btn .ci{font-size:16px}
+    body.sidebar-collapsed .collapse-btn{left:14px}
+    body.mobile-nav-open .collapse-btn{left:calc(min(288px,86vw) - 46px);background:#fff}
+    body.mobile-nav-open .collapse-btn .ci{transform:rotate(180deg)}
+    .head{margin-top:44px}
+    .head h1{font-size:22px}
+    .head p{font-size:12.5px}
+    .verdict{padding:16px 16px;gap:12px;margin-bottom:6px}
+    .verdict .badge{width:48px;height:48px;border-radius:14px}
+    .badge-icon{width:48px;height:48px;border-radius:14px}
+    .badge-icon::after{font-size:24px}
     .verdict .vt{min-width:0;flex:1 1 100%}
-    .verdict .vt h2{font-size:17px}
-    .verdict .vt p{font-size:13px}
-    .radar-row{padding:16px 14px;gap:6px}
-    .rsum .ri .nm{width:88px;font-size:13px}
-    .kpi,.hl,.adv{padding:16px 16px}
-    .kpi .val{font-size:26px}
-    .redline{padding:18px 16px}
-    .sec{margin:24px 0 12px}
-    .sec h3{font-size:16px}
-    .collapse-btn{top:20px}
-    body:not(.sidebar-collapsed) .collapse-btn{left:calc(min(288px,80vw) - 13px)}
+    .verdict .vt h2{font-size:16px}
+    .verdict .vt p{font-size:12.5px}
+    .radar-row{padding:14px 12px;gap:6px}
+    .rsum .ri{gap:10px;padding:8px 2px}
+    .rsum .ri .nm{width:80px;font-size:12.5px}
+    .rsum .ri .tg{width:34px;font-size:11.5px}
+    .kpis,.hls,.advice{gap:12px}
+    .kpi,.hl,.adv{padding:14px 14px}
+    .kpi .val{font-size:24px}
+    .kpi .kh{margin-bottom:10px}
+    .kpi .kh .lb{font-size:12px}
+    .redline{padding:16px 14px}
+    .redline .rl-title{font-size:14.5px}
+    .redline p{font-size:12.5px}
+    .redline .ev{font-size:12px}
+    .redline .ev.ctx .ln{font-size:12px}
+    .redline .ev.ctx .ctx-head .who{font-size:11px}
+    .sec{margin:22px 0 10px}
+    .sec h3{font-size:15px}
+    .sec .hint{font-size:11.5px}
+    tbody td{padding:10px 14px;font-size:12.5px}
+    thead th{padding:10px 14px;font-size:11.5px}
+    .mfoot{font-size:11px;margin-top:24px}
   }
   @media(max-width:600px){thead{display:none}tbody td{display:block;border:none;padding:4px 18px}tbody tr{display:block;border-bottom:1px solid var(--hair);padding:14px 0}}
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -325,6 +362,8 @@
       {{HIGHLIGHT_CARDS}}
     </div>
 
+    {{REDLINE_ALERT}}
+
     <div class="sec" id="bad"><h3>可以更好的地方</h3><span class="line"></span></div>
     <div class="card tbl">
       <table>
@@ -362,20 +401,44 @@
 (function(){
   const KEY="interviewer-review-sidebar-collapsed";
   const sidebar=document.getElementById('sidebar'),btn=document.getElementById('collapseBtn');
+  const mq=window.matchMedia && matchMedia('(max-width:720px)');
+  function isMobile(){return mq && mq.matches;}
   function apply(collapsed){
     sidebar.classList.toggle('collapsed',collapsed);
     document.body.classList.toggle('sidebar-collapsed',collapsed);
     btn.setAttribute('aria-expanded',String(!collapsed));
     btn.setAttribute('aria-label',collapsed?'展开侧边栏':'收起侧边栏');
   }
+  function applyMobile(open){
+    sidebar.classList.toggle('mobile-open',open);
+    document.body.classList.toggle('mobile-nav-open',open);
+    btn.setAttribute('aria-expanded',String(open));
+    btn.setAttribute('aria-label',open?'关闭菜单':'打开菜单');
+  }
   let saved=null;
   try{saved=localStorage.getItem(KEY);}catch(e){}
-  apply(saved==='1');
+  // 桌面态才吃 collapsed；移动态永远从 nav-closed 起步
+  if(!isMobile()) apply(saved==='1');
   btn.addEventListener('click',function(){
+    if(isMobile()){
+      applyMobile(!sidebar.classList.contains('mobile-open'));
+      return;
+    }
     const next=!sidebar.classList.contains('collapsed');
     apply(next);
     try{localStorage.setItem(KEY,next?'1':'0');}catch(e){}
   });
+  // 移动端点击 nav 链接后自动收起抽屉
+  sidebar.querySelectorAll('nav a').forEach(function(a){
+    a.addEventListener('click',function(){ if(isMobile()) applyMobile(false); });
+  });
+  // 视口从移动 → 桌面切换时,恢复桌面 collapsed 状态
+  if(mq){
+    (mq.addEventListener?mq.addEventListener.bind(mq,'change'):mq.addListener.bind(mq))(function(e){
+      if(!e.matches){ applyMobile(false); apply(saved==='1'); }
+      else { sidebar.classList.remove('collapsed'); document.body.classList.remove('sidebar-collapsed'); }
+    });
+  }
 })();
 (function(){
   const reduce=window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;

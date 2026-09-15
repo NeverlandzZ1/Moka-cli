@@ -112,10 +112,10 @@ function genKPI(durationMin, ivShare, ivQuestions, candQuestions, redLineCount, 
   var redChip = redLineCount === 0 ? "good" : "bad";
   var redLabel = redLineCount === 0 ? "0 条" : redLineCount + " 条";
   return [
-    '<div class="kpi"><div class="kh"><span class="chip ' + minChip + '">' + minLabel + '</span><span class="lb">面试总时长</span></div><div class="val num">' + Math.round(durationMin) + '<span class="u">min</span></div><div class="ft">' + refMin + '</div></div>',
-    '<div class="kpi"><div class="kh"><span class="chip ' + shareChip + '">' + shareLabel + '</span><span class="lb">面试官说话占比</span></div><div class="val num">' + ivShare + '<span class="u">%</span></div><div class="track"><i style="width:' + ivShare + '%;background:#0a84ff"></i><div class="goal" style="left:20%"></div></div><div class="ft">目标 ≤20% · 候选人占 ' + (100 - ivShare).toFixed(1) + '%</div></div>',
-    '<div class="kpi"><div class="kh"><span class="chip good">正常</span><span class="lb">追问轮数</span></div><div class="val num">' + ivQuestions + '<span class="u">问</span></div><div class="ft">面试官提问 ' + ivQuestions + ' 次 · 候选人提问 ' + candQuestions + ' 次</div></div>',
-    '<div class="kpi"><div class="kh"><span class="chip ' + redChip + '">' + redLabel + '</span><span class="lb">红线命中</span></div><div class="val num">' + redLineCount + '<span class="u">条</span></div><div class="ft">' + (redLineCount === 0 ? "未触碰任何合规红线" : "命中合规红线，需注意") + '</div></div>'
+    '<div class="card kpi"><div class="kh"><span class="chip ' + minChip + '">' + minLabel + '</span><span class="lb">面试总时长</span></div><div class="val num">' + Math.round(durationMin) + '<span class="u">min</span></div><div class="ft">' + refMin + '</div></div>',
+    '<div class="card kpi"><div class="kh"><span class="chip ' + shareChip + '">' + shareLabel + '</span><span class="lb">面试官说话占比</span></div><div class="val num">' + ivShare + '<span class="u">%</span></div><div class="track"><i style="width:' + ivShare + '%;background:#0a84ff"></i><div class="goal" style="left:20%"></div></div><div class="ft">目标 ≤20% · 候选人占 ' + (100 - ivShare).toFixed(1) + '%</div></div>',
+    '<div class="card kpi"><div class="kh"><span class="chip good">正常</span><span class="lb">追问轮数</span></div><div class="val num">' + ivQuestions + '<span class="u">问</span></div><div class="ft">面试官提问 ' + ivQuestions + ' 次 · 候选人提问 ' + candQuestions + ' 次</div></div>',
+    '<div class="card kpi"><div class="kh"><span class="chip ' + redChip + '">' + redLabel + '</span><span class="lb">红线命中</span></div><div class="val num">' + redLineCount + '<span class="u">条</span></div><div class="ft">' + (redLineCount === 0 ? "未触碰任何合规红线" : "命中合规红线，需注意") + '</div></div>'
   ].join("");
 }
 
@@ -155,7 +155,7 @@ function genHighlights(hls) {
     var qs = (h.quotes || []).map(function (q) {
       return '<div class="q"><span class="ts">' + q.ts + '</span>' + q.text + '</div>';
     }).join("");
-    return '<div class="hl"><div class="tp"><span class="mk">' + (h.mk || "★") + '</span><b>' + h.title + '</b></div><span class="rb">' + h.rubric + '</span><p>' + h.desc + '</p>' + qs + '</div>';
+    return '<div class="card hl"><div class="tp"><span class="mk">' + (h.mk || "★") + '</span><b>' + h.title + '</b></div><span class="rb">' + h.rubric + '</span><p>' + h.desc + '</p>' + qs + '</div>';
   }).join("");
 }
 
@@ -169,8 +169,78 @@ function genImproves(imps) {
 function genAdvice(ads) {
   if (!ads) return "";
   return ads.map(function (a) {
-    return '<div class="adv"><div class="ic">' + a.ic + '</div><b>' + a.title + '</b><p>' + a.desc + '</p></div>';
+    return '<div class="card adv"><div class="ic">' + a.ic + '</div><b>' + a.title + '</b><p>' + a.desc + '</p></div>';
   }).join("");
+}
+
+function escHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// 把 **word** 里的 word 转成 <mark>word</mark>,其余字符全部按 HTML 实体转义。
+// 用于在红线上下文的原话里高亮触发词。
+function escHtmlWithMark(s) {
+  var raw = String(s == null ? "" : s);
+  var parts = raw.split(/\*\*([^*]+)\*\*/g); // 偶数下标 = 普通文本, 奇数下标 = mark 内容
+  return parts.map(function (chunk, idx) {
+    return idx % 2 === 1
+      ? "<mark>" + escHtml(chunk) + "</mark>"
+      : escHtml(chunk);
+  }).join("");
+}
+
+// 渲染单条 evidence:
+// - 若 q.context 是数组(≥1 行),按"上下文块"渲染 → 顶部时间戳+说话人,下方多行,hit:true 的行高亮;
+// - 否则退回单行 { ts, text } 老结构,保持向后兼容。
+function renderRedlineEv(q) {
+  if (q && Array.isArray(q.context) && q.context.length > 0) {
+    var headTs = escHtml(q.ts || (q.context.find(function (l) { return l && l.hit; }) || q.context[0]).ts || "");
+    var headWho = q.speaker ? escHtml(q.speaker) : "";
+    var lines = q.context.map(function (ln) {
+      if (!ln) return "";
+      var cls = ln.hit ? "ln hit" : "ln";
+      var sp = ln.speaker ? '<span class="sp">' + escHtml(ln.speaker) + ':</span>' : "";
+      var txt = ln.hit ? escHtmlWithMark(ln.text || "") : escHtml(ln.text || "");
+      return '<div class="' + cls + '">' + sp + txt + '</div>';
+    }).join("");
+    return '<div class="ev ctx">'
+      + '<div class="ctx-head"><span class="ts">' + headTs + '</span>'
+      + (headWho ? '<span class="who">面试官 ' + headWho + '</span>' : '')
+      + '</div>'
+      + lines
+      + '</div>';
+  }
+  return '<div class="ev"><span class="ts">' + escHtml(q.ts || "") + '</span>' + escHtml(q.text || "") + '</div>';
+}
+
+// 生成合规红线告警区块。details 为详细数组时,每条按 goodcase 的 rl-top+p+ev 结构渲染;
+// 否则退回只用 redLineHits 字符串,给一个简版卡片。都没有 → 返回空串,整块不出现。
+function genRedlineAlert(redLineHits, details) {
+  if (details && Array.isArray(details) && details.length > 0) {
+    var cards = details.map(function (d) {
+      var quotes = d.quotes || (d.ts || d.text || d.context ? [{ ts: d.ts, text: d.text, context: d.context }] : []);
+      var evs = quotes
+        .filter(function (q) { return q && (q.ts || q.text || (Array.isArray(q.context) && q.context.length)); })
+        .map(renderRedlineEv).join("");
+      return '<div class="card redline">'
+        + '<div class="rl-top"><span class="rl-chip">红线</span><span class="rl-title">' + escHtml(d.title || "涉及合规问题") + '</span></div>'
+        + (d.desc ? '<p>' + escHtml(d.desc) + '</p>' : '')
+        + evs
+        + '</div>';
+    }).join("");
+    return '<div class="sec" id="redline"><h3>合规红线告警</h3><span class="line"></span></div>' + cards;
+  }
+  if (redLineHits && redLineHits.length > 0) {
+    var title = "涉及" + redLineHits.map(escHtml).join("、") + "问题";
+    return '<div class="sec" id="redline"><h3>合规红线告警</h3><span class="line"></span></div>'
+      + '<div class="card redline">'
+      + '<div class="rl-top"><span class="rl-chip">红线</span><span class="rl-title">' + title + '</span></div>'
+      + '<p>本场面试触碰上述合规红线,建议 HR 复核相关时段原文并跟进面试官改进。</p>'
+      + '</div>';
+  }
+  return "";
 }
 
 function getBadgeInfo(scores, redLineHits) {
@@ -213,6 +283,7 @@ async function main() {
   if (!scoresRaw) fail("missing --scores or --scores-file");
   var scores = scoresRaw.scores || scoresRaw;
   var redLineHits = scoresRaw.redLineHits || scores.redLineHits || [];
+  var redLineDetails = scoresRaw.redLineDetails || scores.redLineDetails || null;
   var hallmarkBadge = scoresRaw.hallmarkBadge || scores.hallmarkBadge;
 
   // 读取 highlights / improves / advice
@@ -307,6 +378,7 @@ async function main() {
     .replace(/\{\{RADAR_SUMMARY_ROWS\}\}/g, genRadarRows(scores))
     .replace(/\{\{KPI_CARDS\}\}/g, genKPI(durationMin, ivShare, ivQuestions, candQuestions, redLineHits.length, isIntern))
     .replace(/\{\{HIGHLIGHT_CARDS\}\}/g, genHighlights(highlights))
+    .replace(/\{\{REDLINE_ALERT\}\}/g, genRedlineAlert(redLineHits, redLineDetails))
     .replace(/\{\{IMPROVE_ROWS\}\}/g, genImproves(improves))
     .replace(/\{\{ADVICE_CARDS\}\}/g, genAdvice(advice));
 
