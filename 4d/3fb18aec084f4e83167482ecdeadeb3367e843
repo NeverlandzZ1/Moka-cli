@@ -1,0 +1,27 @@
+skills/moka-transcript-getter/scripts/deduplicate-lark-base.mjs
+  s_9d988f2c5f030f::t_c36da62392fca8 388-406,410-416,418,423,426,430,439,441-450,452-454,458-462
+  s_9d988f2c5f030f::t_4a12ef2457ae84 49-53
+  s_9d988f2c5f030f::t_3400fa776cfeff 485,491-509,515-517
+  s_9d988f2c5f030f::t_46c9b4e22411b5 510
+skills/moka-transcript-getter/references/interviewer-review-workflow.md
+  s_9d988f2c5f030f::t_d358b2fb36cb12 79-85
+  s_9d988f2c5f030f::t_1cbf6599b265d8 106
+skills/moka-transcript-getter/assets/report-template.html
+  s_9d988f2c5f030f::t_4217a38c792762 227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.44-trip",
+  "base_commit_sha": "4d3fb18aec084f4e83167482ecdeadeb3367e843",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "arn:aws:bedrock:us-west-2:456197019624:application-inference-profile/bumrjndkqzw8"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
