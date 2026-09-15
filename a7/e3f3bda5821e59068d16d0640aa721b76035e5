@@ -1,0 +1,36 @@
+skills/moka-transcript-getter/references/evaluation-guide.md
+  s_9d988f2c5f030f::t_2fec00ddcc2952 110-111
+skills/moka-transcript-getter/assets/report-template.html
+  s_9d988f2c5f030f::t_05c57b29d79480 218-224,226-237,239-253,256-261
+  s_9d988f2c5f030f::t_3f97b7bf89c3f0 404-405,412-417,420-421,423-426,431-441
+  s_9d988f2c5f030f::t_bbd005405954d0 365-366
+  s_9d988f2c5f030f::t_eabcb9bfd76b68 254-255
+  s_9d988f2c5f030f::t_5802e6bfbd84cd 193,195-204
+skills/moka-transcript-getter/scripts/generate-report.mjs
+  s_9d988f2c5f030f::t_b63035f7ef8dbc 115-118
+  s_9d988f2c5f030f::t_d10accf451613b 158
+  s_9d988f2c5f030f::t_e954e6e557a3bd 176-181,218-222,227-245
+  s_9d988f2c5f030f::t_482cc7a79c7019 381
+  s_9d988f2c5f030f::t_3c5ba68c6bbf9b 172
+  s_9d988f2c5f030f::t_b2909c260b222b 182-217,223-226
+  s_9d988f2c5f030f::t_4f405fd635fa77 286
+skills/moka-transcript-getter/references/interviewer-review-workflow.md
+  s_9d988f2c5f030f::t_a8fe0630dd0dc1 59-97
+  s_9d988f2c5f030f::t_10f2d8d80a3c61 145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.44-trip",
+  "base_commit_sha": "a7e3f3bda5821e59068d16d0640aa721b76035e5",
+  "prompts": {},
+  "sessions": {
+    "s_9d988f2c5f030f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75258560-f707-43eb-b872-568e1b602d3b",
+        "model": "ep-bpcl3tow"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
