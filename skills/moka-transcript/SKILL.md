@@ -362,6 +362,8 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
 - 对每条处理记录，按 `interviewer-review/SKILL.md` 和其 `references/` 完成：逐字稿统计 → 阅读逐字稿 → 产出符合 `report-contract.md` 的 `analysis.json` → 调用**原版** `render_report.py` → 调用**原版** `validate_report.py`。
+- 时间戳倒退不再阻断报告生成：`transcript_stats.py` 现在用 `raw_ts`（绝对时间）作为 `display_ts`，时间线倒退不再报 warning，`span.valid` 始终为 `true`，不需要前置检查。
+- **面试官说话人绑定**：Moka 的 `interviewerNames` 是展示姓名（如 `Jiahui Ji （季家晖）`），但转录里的 speaker 标签可能是缩写/昵称（如 `J`、`GYF`、`小雨`）。先拿 Moka 展示姓名跑一次统计，若 `binding_warnings` 非空，需从 `stats.speakers` 的 keys 里找到提问最多（`questions` 最高）的说话人作为面试官标签，用该标签重新跑统计，直到 `binding_warnings` 为空。`interviewer_speakers` 必须写转录统计 JSON 中存在的 speaker 标签，不是 Moka 展示姓名。
 - 原始字段映射固定为：`candidateName → metadata.candidate`，`interviewerNames（按「、」连接）→ metadata.interviewer`，`jobTitle → metadata.position`，`roundName → metadata.round`，`startTime → metadata.date`，`transcript → 统计输入`。候选人和面试官展示姓名必须直接取 record 的结构化字段，**不得**从转录内容猜测。`interviewer_speakers` 则必须使用统计结果中出现的 speaker 标签，只用于角色绑定、KPI 与证据校验，不得用真实展示姓名替代。
 - 只有校验退出码为 0 的 HTML 才能进入上传阶段。生成报告一律写入 `<transcript.json 所在目录>/reports/面试复盘报告-<面试官>-<候选人>.html`；面试官与候选人使用上述 record 真名，遇到 Windows 非法文件名字符 `\\ / : * ? " < > |` 时替换为安全字符，空值写“未记录”。
 - 从 `analysis.json.radar` 写入 `record.reviewScores`：`openingFlow`、`questionQuality`、`listening`、`followUpDepth`、`scaleControl`、`feedbackExperience`；同时写入 `redLineHits`（由已确认 `redlines` 派生），以保持现有 Base 字段契约不变。
@@ -375,6 +377,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 - 用 `drive +upload` 上传本地 HTML。因 lark-cli 文件参数只允许 cwd 内的相对路径，先将 cwd 切换到报告文件所在目录，再传 `--file ./面试复盘报告-<面试官>-<候选人>.html --folder-token NY5IfFoh5lQmIaddwoSc6oJznBc --as user`。逐份**串行**上传到同一目录，不并发上传。
 - 仅使用飞书上传成功响应返回的真实、可访问 URL 写入 `record.reviewReportUrl`；绝不拼接或猜测 URL。若响应没有可用 URL，视为上传失败，不写 URL。
 - 上传失败：写 `record.reviewError = "drive upload failed: <简短原因>"`，保留本地 HTML，继续下一条。不得把报告上传到其他目录。
+- **上传成功后立即转移 owner**：每份 HTML 上传成功后，立即调用 `drive permission.members transfer_owner` 把 owner 转给 HR 指定接收人（固定 open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`，即 Julia Tian（田颖），tianying@trip.com）。参数固定：`--params '{"token":"<file_token>","type":"file","remove_old_owner":false,"old_owner_perm":"full_access","need_notification":false}' --data '{"member_type":"openid","member_id":"ou_0f7d6f3c5c579945fae70cb2348e6091"}' --yes --as user`。`remove_old_owner=false` 保留上传者 full_access，`need_notification=false` 不打扰接收人。转移失败不阻塞该条记录（URL 已写入），但在汇报中标注"owner 转移失败"让 HR 手动处理。
 
 所有 record 处理完成后，把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`；顶层 `generatedAt` / `source` / `errors` / `stats` 保留原值。
 
@@ -511,6 +514,10 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 | 现象 | 根因 | 处置 |
 |---|---|---|
 | `interviewer-review` 的 Python 脚本输出乱码或 JSON 为空 | Windows 默认编码与 Python 输出编码不一致 | 执行前设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`，再按原版 skill 的命令重跑；不得改写其统计或渲染脚本 |
+| `python3` 命令不存在，报 `exit code 9009` | Windows 上可执行文件名是 `python` 不是 `python3` | 用 `python` 替代 `python3`；SKILL.md 命令模板写 `python3`（跨平台兼容），Windows 实跑时换成 `python` |
+| PowerShell `>` 重定向生成的 JSON 带 UTF-16 BOM，`json.loads` 报 `Unexpected UTF-8 BOM` | PowerShell 5.1 的 `>` 默认用 UTF-16 编码 | **禁止用 PowerShell `>` 重定向保存 Python stdout**；改用 Python 子进程 `capture_output=True, text=True, encoding='utf-8'` 捕获后用 `open(path,'w',encoding='utf-8')` 写文件 |
+| `Set-Content -Encoding UTF8` 生成的 JSON 带 BOM，`json.loads` 报 `JSONDecodeError` | PS 5.1 的 `-Encoding UTF8` 会加 BOM | **禁止用 `Set-Content -Encoding UTF8` 写 JSON**；改用 `writeFile` 工具或 Node.js `fs.writeFileSync(path, content, 'utf-8')`，两者都不加 BOM |
+| PowerShell `&&` 链接失败，报 `ParserError` | PowerShell 5.1 不支持 `&&` | 用 `;` 或 `if ($?) { ... }` 替代，或分成多次 execScript 调用 |
 | `python -c "f'{...}'"` 单行崩 SyntaxError | PowerShell 引号转义与 Python f-string 冲突 | **禁止 `python -c` 单行运行任何含 f-string 或多语句的代码**;写到 `.py` 临时文件再跑 |
 | `node "scripts/xxx.mjs"` 找不到脚本 | 宿主 execScript 的 cwd 不在 skill 目录 | **一律用绝对路径** `node "<Skill目录>/scripts/xxx.mjs"`。共同前置第 1 步就是干这个的 |
 | 手误 `D:` 打成 `E:` | 无 | 每一次 execScript 之前肉眼核对盘符 |
@@ -520,6 +527,14 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 | 现象 | 根因 | 处置 |
 |---|---|---|
 | 原版校验脚本失败 | `analysis.json`、证据或 HTML 结构不符合 `interviewer-review` 契约 | 修正 analysis 后重新调用原版渲染和校验；校验未通过不得上传或写 URL |
+| 校验报"雷达强项「XX」缺少对应亮点证据" | 雷达分数 ≥3.5 的维度必须有对应 `highlights` 条目 | 给该维度补一条亮点（含 2-3 段证据），或把分数降到 3.0 以下 |
+| 校验报"证据 turn_index 跨判断重复使用" | 同一段原话 `turn_index` 同时出现在亮点和改进项里，或跨卡重复 | 每条 `turn_index` 只能用在一个 `claim_id` 里；亮点和改进项必须引用不同的轮次 |
+| 校验报"亮点 N 的原话过短或为空" | 选了"对。""Ok."等极短回复作为证据 | 换一段内容足够长的面试官轮次作为证据 |
+| 校验报"改进项 N 评价开场，evidence_basis 必须是 opening_boundary" | 改进项引用了开场区域轮次但 `evidence_basis` 写成了 `direct` | 改为 `opening_boundary`，且 `single_event:true`，证据必须含面试官第一轮原话 |
+| 校验报"改进项 N 的追问证据必须展示至少 3 轮完整问答链" | 追问不足的改进项只给了 2 个或不相邻的 `turn_index` | 必须给 3 个**局部相邻**的轮次：面试官提问 → 候选人回答 → 面试官下一步 |
+| 校验报"badge_line 必须为 20–35 字" | `badge_line` 超长或过短 | 精简到 20-35 个中文字符（不含 `<em>` 标签） |
+| 校验报"改进项 N 的开场证据必须包含面试官第一轮原话" | `opening_boundary` 改进项的 `evidence_turn_indices` 没包含 turn_index=面试官第一轮 | 必须在证据里加上面试官第一轮的 `turn_index`，可以再补一个前 3 轮内的其他轮次 |
+| 校验报"改进项 N 评价收尾，evidence_basis 必须是 closing_boundary" | 改进项引用了收尾区域轮次但 `evidence_basis` 写成了 `direct` | 改为 `closing_boundary`，且 `single_event:true`，证据用面试官最后一轮原话 |
 | Drive 上传失败或缺少 scope | lark-cli 用户身份没有 Drive 上传权限，或目标目录无权限 | 中断后续写入并汇报，需要 HR 在首次配置入口补充 Drive 用户授权；定时任务不弹授权二维码 |
 | 上传响应没有真实 URL | 上传结果不完整或 Agent 未能提取可访问链接 | 视为该条失败，保留本地 HTML，不猜测或拼接 URL |
 
@@ -554,12 +569,17 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 
 进入任一定时入口前,**必须**在心里过一遍下面这份清单;违背任何一条基本都会踩坑:
 
-- [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。
+- [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。**注意 moka-transcript 和 interviewer-review 是两个不同的 skill 目录**,各自的 `.mjs`/`.py` 用各自目录的绝对路径。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
 - [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
-- [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。
-- [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
+- [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。上传成功后立即转移 owner 给 Julia Tian（open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`）。
+- [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。Windows 上用 `python` 而非 `python3`。
+- [ ] **禁止用 PowerShell `>` 或 `Set-Content -Encoding UTF8` 保存 Python stdout 生成的 JSON**（会加 BOM）；用 Python 子进程 `capture_output` + `open('w',encoding='utf-8')` 或 Node.js `fs.writeFileSync('utf-8')`。
+- [ ] **禁止用 PowerShell `&&`**；用 `;` 或 `if ($?)` 替代。
 - [ ] 报告文件名为 `面试复盘报告-<面试官>-<候选人>.html`，姓名来自 record 的结构化字段；只替换 Windows 非法字符。统计临时文件仍使用 ASCII 名称。
+- [ ] 时间戳倒退不再阻断报告生成，`display_ts` 等于 `raw_ts`（绝对时间），无需前置检查 `span.valid`。
+- [ ] **面试官说话人绑定**：Moka 展示姓名匹配失败时，从 `stats.speakers` 里找提问最多的说话人标签重新跑统计。`interviewer_speakers` 写转录 speaker 标签，不是 Moka 展示姓名。
+- [ ] **analysis.json 校验器常见坑**：① 雷达 ≥3.5 的维度必须有对应亮点；② `turn_index` 不可跨判断重复；③ 证据原话不可过短（避免"对。""Ok."）；④ 开场改进须 `opening_boundary`+面试官第一轮原话；⑤ 收尾改进须 `closing_boundary`+面试官最后一轮原话；⑥ 追问改进须 3 轮局部相邻问答链（面试官→候选人→面试官）；⑦ `badge_line` 限 20-35 字。在写 analysis 时一次性满足，避免报错循环。
 - [ ] 大 JSON 结构探查用 `.cjs` 脚步文件,不用 `grep` / `Read` / `node -e` / `python -c` 硬碰。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
