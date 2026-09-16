@@ -362,8 +362,8 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
 - 对每条处理记录，按 `interviewer-review/SKILL.md` 和其 `references/` 完成：逐字稿统计 → 阅读逐字稿 → 产出符合 `report-contract.md` 的 `analysis.json` → 调用**原版** `render_report.py` → 调用**原版** `validate_report.py`。
-- 原始字段映射固定为：`candidateName → metadata.candidate`，`jobTitle → metadata.position`，`roundName → metadata.round`，`startTime → metadata.date`，`interviewerNames → 辅助识别逐字稿中的真实面试官说话人名`，`transcript → 统计输入`。`interviewer_speakers` 必须使用统计结果中出现的说话人名，不得直接猜用 Moka 的展示姓名。
-- 只有校验退出码为 0 的 HTML 才能进入上传阶段。生成报告一律写入 `<transcript.json 所在目录>/reports/review-<interviewId>.html`；文件名只允许 ASCII，姓名只出现在 HTML 内容中。
+- 原始字段映射固定为：`candidateName → metadata.candidate`，`interviewerNames（按「、」连接）→ metadata.interviewer`，`jobTitle → metadata.position`，`roundName → metadata.round`，`startTime → metadata.date`，`transcript → 统计输入`。候选人和面试官展示姓名必须直接取 record 的结构化字段，**不得**从转录内容猜测。`interviewer_speakers` 则必须使用统计结果中出现的 speaker 标签，只用于角色绑定、KPI 与证据校验，不得用真实展示姓名替代。
+- 只有校验退出码为 0 的 HTML 才能进入上传阶段。生成报告一律写入 `<transcript.json 所在目录>/reports/面试复盘报告-<面试官>-<候选人>.html`；面试官与候选人使用上述 record 真名，遇到 Windows 非法文件名字符 `\\ / : * ? " < > |` 时替换为安全字符，空值写“未记录”。
 - 从 `analysis.json.radar` 写入 `record.reviewScores`：`openingFlow`、`questionQuality`、`listening`、`followUpDepth`、`scaleControl`、`feedbackExperience`；同时写入 `redLineHits`（由已确认 `redlines` 派生），以保持现有 Base 字段契约不变。
 - 单条评分、渲染或校验失败：写 `record.reviewError = "interviewer-review failed: <简短原因>"`，保留本地中间文件供排查，不阻断其他记录。
 
@@ -372,7 +372,7 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 对每条已通过原版校验的 HTML：
 
 - 使用 lark-cli **user 身份**上传到固定 folder token `NY5IfFoh5lQmIaddwoSc6oJznBc`。先确认当前用户具有 Drive 上传权限；缺少 Drive scope 时中断并汇报“飞书 Drive 授权失效，需要在首次配置入口补充 Drive 用户授权”，定时任务中不得发起交互授权。
-- 用 `drive +upload` 上传本地 HTML。因 lark-cli 文件参数只允许 cwd 内的相对路径，先将 cwd 切换到报告文件所在目录，再传 `--file ./review-<interviewId>.html --folder-token NY5IfFoh5lQmIaddwoSc6oJznBc --as user`。逐份**串行**上传到同一目录，不并发上传。
+- 用 `drive +upload` 上传本地 HTML。因 lark-cli 文件参数只允许 cwd 内的相对路径，先将 cwd 切换到报告文件所在目录，再传 `--file ./面试复盘报告-<面试官>-<候选人>.html --folder-token NY5IfFoh5lQmIaddwoSc6oJznBc --as user`。逐份**串行**上传到同一目录，不并发上传。
 - 仅使用飞书上传成功响应返回的真实、可访问 URL 写入 `record.reviewReportUrl`；绝不拼接或猜测 URL。若响应没有可用 URL，视为上传失败，不写 URL。
 - 上传失败：写 `record.reviewError = "drive upload failed: <简短原因>"`，保留本地 HTML，继续下一条。不得把报告上传到其他目录。
 
@@ -490,7 +490,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 2. 定位 lark-cli；Windows 上设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`。
 3. 默认模式执行 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`；全模式依次 CDP 自检、校招覆盖、社招合并，期间不写飞书。
 4. 遍历 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
-5. 按 record 串行将通过校验的 `review-<interviewId>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
+5. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
 6. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
 
 **成功判定**：导出、报告校验、每份 Drive 上传、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告或上传失败不阻断其他记录，但必须在汇总中体现。
@@ -559,7 +559,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
 - [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
-- [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),姓名放在 HTML 内容里(纯技术兼容要求,不是脱敏)。
+- [ ] 报告文件名为 `面试复盘报告-<面试官>-<候选人>.html`，姓名来自 record 的结构化字段；只替换 Windows 非法字符。统计临时文件仍使用 ASCII 名称。
 - [ ] 大 JSON 结构探查用 `.cjs` 脚步文件,不用 `grep` / `Read` / `node -e` / `python -c` 硬碰。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
