@@ -1,0 +1,23 @@
+skills/moka-transcript/SKILL.md
+  s_84fa8680e37da6::t_7554b74db8c901 2-3,6,19-20,33,35,43-44
+skills/pack.py
+  s_84fa8680e37da6::t_7554b74db8c901 1,7
+tests/lark-sync-script.test.ts
+  s_84fa8680e37da6::t_7554b74db8c901 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.44-trip",
+  "base_commit_sha": "831007d75ac06491afcdc0380ebab464cdb0c03c",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
