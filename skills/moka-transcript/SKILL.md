@@ -1,9 +1,9 @@
 ---
-name: moka-transcript-getter
-description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript-getter、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到"定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。"或"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"时；支持环境安装、Moka CDP 登录、本地登录态持久化、飞书用户授权、可选创建默认模式(纯 HTTP、无需 CDP 常驻)或全模式(需 CDP 常驻切换校招/社招)的定时任务并批量写入飞书 Base 后自动去重。
+name: moka-transcript
+description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到"定时任务，调用moka-transcript skill，抓取今日默认模式转写。"或"定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。"时；支持环境安装、Moka CDP 登录、本地登录态持久化、飞书用户授权、可选创建默认模式(纯 HTTP、无需 CDP 常驻)或全模式(需 CDP 常驻切换校招/社招)的定时任务并批量写入飞书 Base 后自动去重。
 ---
 
-# Moka Transcript Getter
+# Moka Transcript
 
 只处理用户有权访问的 Moka 和飞书数据。通过本机 CDP Chrome 的已登录会话读取 Moka，通过 lark-cli 用户身份写入飞书 Base。
 
@@ -16,8 +16,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 根据请求选择且只执行一个入口：
 
 1. 用户要求"配置环境并登录"或同义表达：执行"首次配置入口"。
-2. 请求内容为或明确表达"定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。"：执行"定时采集入口 · 默认模式"。
-3. 请求内容为或明确表达"定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。"：执行"定时采集入口 · 全模式"。
+2. 请求内容为或明确表达"定时任务，调用moka-transcript skill，抓取今日默认模式转写。"：执行"定时采集入口 · 默认模式"。
+3. 请求内容为或明确表达"定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。"：执行"定时采集入口 · 全模式"。
 
 ## 固定配置
 
@@ -30,22 +30,18 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - CLI 内部 Moka cookie 缓存：`~/.opencli/mokaData/moka-cookies.json`（仅 CLI 读写，Agent 不得读取）
 - CLI 内部 interviewList 请求体模板缓存：`~/.opencli/mokaData/moka-interview-list-payload.json`
 - 定时任务名称（默认模式）：`Moka转写抓取-默认模式`
-- 定时任务指令（默认模式）：`定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。`
+- 定时任务指令（默认模式）：`定时任务，调用moka-transcript skill，抓取今日默认模式转写。`
 - 定时任务名称（全模式）：`Moka转写抓取-全模式`
-- 定时任务指令（全模式）：`定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。`
+- 定时任务指令（全模式）：`定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。`
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`当前助手自身`
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列；**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
-- 逐字稿量化脚本：`scripts/transcript_stats.py`（读取纯文本逐字稿，输出面试官/候选人时长、追问轮次等统计 JSON）
-- 报告一键生成脚本：`scripts/generate-report.mjs`（封装"复制模板 → 替换 18 个 token → 跑 transcript_stats.py → 校验 → 输出 HTML"全流程；**已修复 `readJsonArg` 使用 `fsSync` 而非 `fs`(promises) 读取 `--scores-file` 等文件参数的 bug**；Agent 只需打分+传参,不要手写 HTML 或临时脚本）
-- 报告模板:`assets/report-template.html`(六维复盘 HTML,含 18 个 `{{TOKEN}}`;logo 和 badge icon 均为纯 CSS 样式,无外部图片依赖,单文件自包含)
-- 复盘称号:`{{BADGE_ICON}}` 填 CSS 类名后缀(破冰高手/灵魂提问官/最佳听众/追问达人/分寸感在线/暖心体验官/本场请注意),模板内置 7 档 CSS 图标(emoji+渐变背景)
 - 脚本契约：`references/lark-base-write.md`
-- 评分与报告执行契约：`references/interviewer-review-workflow.md`
-- 评分锚点与话术：`references/evaluation-guide.md`、`references/interview-toolkit.md`、`references/red-lines.md`
+- 定时报告引擎（必需的独立 skill）：`interviewer-review`。它是评分规范、统计、渲染、校验与 HTML 模板的**唯一真源**；本 skill 不保留副本，不得降级回手写 HTML 或旧 `generate-report.mjs`。
+- 定时报告云盘目录：`https://trip.larkenterprise.com/drive/folder/NY5IfFoh5lQmIaddwoSc6oJznBc`，folder token 为 `NY5IfFoh5lQmIaddwoSc6oJznBc`。报告上传后使用飞书返回的真实文件 URL 写入 `record.reviewReportUrl`。
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
 
@@ -262,7 +258,7 @@ opencli moka login -f json
 
 ```text
 任务名称：Moka转写抓取-默认模式
-任务指令：定时任务，调用moka-transcript-getter skill，抓取今日默认模式转写。
+任务指令：定时任务，调用moka-transcript skill，抓取今日默认模式转写。
 Cron：<根据用户执行时机生成>
 时区：Asia/Shanghai
 执行 Agent：当前助手自身
@@ -272,7 +268,7 @@ Cron：<根据用户执行时机生成>
 
 ```text
 任务名称：Moka转写抓取-全模式
-任务指令：定时任务，调用moka-transcript-getter skill，抓取今日社招和校招所有转写。
+任务指令：定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。
 Cron：<根据用户执行时机生成>
 时区：Asia/Shanghai
 执行 Agent：当前助手自身
@@ -300,7 +296,7 @@ opencli moka export-transcripts --offline --output "<绝对输出路径>" --over
 
 ### 2. 共用后处理
 
-导出成功后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + artifact 发布 + 单次 sync + 去重）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
+导出成功后，走 [`## 共用后处理`](#共用后处理) 的六段流程（原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
 
 ## 定时采集入口 · 全模式
 
@@ -322,7 +318,7 @@ lark-cli 授权失效的场景不在本步骤主动预检，交给 sync/dedup �
 
 **lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup 等脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，面试官(人员)回填由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 报告由当前 Claude 就地打包成自包含单文件 artifact 并发布,拿到公开 URL 后写入 `record.reviewReportUrl`。维护脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，面试官(人员)回填由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成并上传到固定飞书云盘目录，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
 
 ### 2. 校招：覆盖导出
 
@@ -352,40 +348,35 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 
 ### 4. 共用后处理
 
-校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的四段流程（评分 + 报告 + artifact 发布 + 单次 sync + 去重）。汇总时分别标注校招/社招导出条数、合并后总数。
+校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的六段流程（原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时分别标注校招/社招导出条数、合并后总数。
 
 ## 共用后处理
 
-两个定时入口在拿到「今天全量 JSON」后，共享以下四段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**，避免旧全模式 sync 两次的问题。
+两个定时入口在拿到「今天全量 JSON」后，共享以下六段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**，避免全模式重复写入。
 
-### 后处理-1. 逐条评分并生成 HTML 报告
+### 后处理-1. 调用原版 `interviewer-review` 生成并校验本地 HTML
 
-严格按 [`references/interviewer-review-workflow.md`](references/interviewer-review-workflow.md) 遍历 `<绝对输出路径>` 的 `records[]`:
+这是定时任务的**唯一**报告生成路径。先定位已安装的 `interviewer-review` skill；若宿主未安装、当前 Agent 无法读取其 `SKILL.md`、或其 `scripts/transcript_stats.py` / `render_report.py` / `validate_report.py` / `assets/report-template.html` 缺失，则中断本次任务，明确报“interviewer-review 报告引擎不可用”，不得改用旧生成器、手写 HTML 或简化模板。
+
+遍历 `<绝对输出路径>` 的 `records[]`：
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
-- 处理的记录:Agent 读逐字稿打 6 维分(精度 0.5,红线维度记 0) → 把评分数据传给 `generate-report.mjs`,脚本自动完成:写临时 txt → 跑 `transcript_stats.py` → 复制模板 → 替换全部 18 个 `{{TOKEN}}` → 校验无残留 → 输出 HTML 路径。**禁止手写 HTML 片段、手写 JSON 配置、手写临时 Node 脚本来生成报告**。
-- 评分/报告完成后,把六维分数和 `hallmarkBadge` / `redLineHits` 挂到 `record.reviewScores`(字段名见 workflow 文件),供下一步和 sync 消费。
-- 单条评分失败: 记 `record.reviewError = "<简短原因>"`,不生成报告,不阻断整批。
+- 对每条处理记录，按 `interviewer-review/SKILL.md` 和其 `references/` 完成：逐字稿统计 → 阅读逐字稿 → 产出符合 `report-contract.md` 的 `analysis.json` → 调用**原版** `render_report.py` → 调用**原版** `validate_report.py`。
+- 原始字段映射固定为：`candidateName → metadata.candidate`，`jobTitle → metadata.position`，`roundName → metadata.round`，`startTime → metadata.date`，`interviewerNames → 辅助识别逐字稿中的真实面试官说话人名`，`transcript → 统计输入`。`interviewer_speakers` 必须使用统计结果中出现的说话人名，不得直接猜用 Moka 的展示姓名。
+- 只有校验退出码为 0 的 HTML 才能进入上传阶段。生成报告一律写入 `<transcript.json 所在目录>/reports/review-<interviewId>.html`；文件名只允许 ASCII，姓名只出现在 HTML 内容中。
+- 从 `analysis.json.radar` 写入 `record.reviewScores`：`openingFlow`、`questionQuality`、`listening`、`followUpDepth`、`scaleControl`、`feedbackExperience`；同时写入 `redLineHits`（由已确认 `redlines` 派生），以保持现有 Base 字段契约不变。
+- 单条评分、渲染或校验失败：写 `record.reviewError = "interviewer-review failed: <简短原因>"`，保留本地中间文件供排查，不阻断其他记录。
 
-**必须原样引用** `interviewer-review` 的脚本(transcript_stats.py)与模板(report-template.html);**严禁**自行改写打分算法或 HTML 模板结构。
+### 后处理-2. 上传校验通过的 HTML 到飞书云盘并写回 URL
 
-### 后处理-2. 把 HTML 发布为自包含 artifact,回填 URL
+对每条已通过原版校验的 HTML：
 
-对每条**已生成 HTML** 的 record:
+- 使用 lark-cli **user 身份**上传到固定 folder token `NY5IfFoh5lQmIaddwoSc6oJznBc`。先确认当前用户具有 Drive 上传权限；缺少 Drive scope 时中断并汇报“飞书 Drive 授权失效，需要在首次配置入口补充 Drive 用户授权”，定时任务中不得发起交互授权。
+- 用 `drive +upload` 上传本地 HTML。因 lark-cli 文件参数只允许 cwd 内的相对路径，先将 cwd 切换到报告文件所在目录，再传 `--file ./review-<interviewId>.html --folder-token NY5IfFoh5lQmIaddwoSc6oJznBc --as user`。逐份**串行**上传到同一目录，不并发上传。
+- 仅使用飞书上传成功响应返回的真实、可访问 URL 写入 `record.reviewReportUrl`；绝不拼接或猜测 URL。若响应没有可用 URL，视为上传失败，不写 URL。
+- 上传失败：写 `record.reviewError = "drive upload failed: <简短原因>"`，保留本地 HTML，继续下一条。不得把报告上传到其他目录。
 
-- 当前 Claude 直接把 HTML 文件全文作为**自包含单文件 artifact 发布**,拿到公开访问 URL。**不走飞书云盘**——云盘上传不稳定,已经放弃。
-- **Artifact 发布成功路径**(2026-09-14 验证通过):
-  1. `generate-report.mjs` 产出的 HTML 是纯 CSS 自包含单文件(logo 和 badge 均为 CSS,无外部图片依赖,体积约 15-25KB),所有行均在 8000 字符以内。
-  2. Agent 用 `readFile` 读取完整 HTML 内容(若超过 200 行需分两次读取,拼接后输出)。
-  3. 在对话中用 `<lobeArtifact>` 标签输出完整 HTML(`type="text/html"`,`identifier="review-<interviewId>"`)。
-  4. 调用 `publishArtifact` 工具发布,传入 identifier,获得公开 URL。
-  5. **多份报告可并行发布**:用 `callSubAgent` 并行派发多个子代理,每个子代理读一份 HTML + 输出 artifact + 发布。每个子代理的 timeout 设为 120 秒。
-  6. **artifact 发布后需单独回填 URL 到飞书 Base**:sync 脚本在报告发布前就已跑完,artifact URL 不会自动写入 Base。需在所有 artifact 发布完成后,用 `tripyoyo-feishu-cli` 的 `run` API(`base +record-upsert --json @./file.json`)逐条把 URL 写入「面试复盘报告」列。**必须用 `tripyoyo-feishu-cli` 的 `run` API 调 lark-cli**,不要用 Node `spawn` + `shell:true`(Windows cmd.exe 编码会炸中文字段名)。
-- 发布前再校验一遍:HTML 里不含未替换的 `{{TOKEN}}`(header 注释里的字面量除外)。
-- 成功: 把 URL 写入 `record.reviewReportUrl`。
-- 失败: 记 `record.reviewError = "artifact publish failed: <简短原因>"`,`reviewReportUrl` 不写,该 record 的本地 HTML 保留供人工排查,继续下一条。
-
-所有 record 处理完成后,把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`(顶层 CollectionResult 的 `generatedAt` / `source` / `errors` / `stats` 保留原值)。
+所有 record 处理完成后，把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`；顶层 `generatedAt` / `source` / `errors` / `stats` 保留原值。
 
 ### 后处理-3. 单次批量写入飞书
 
@@ -460,7 +451,6 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 
 - **`search-user` 查询词提取中文名**:Moka 导出的面试官姓名格式为 `Iris Cheng （程冬芳）`,直接传给 `--query` 会因空格被 lark-cli 拆成位置参数报错。脚本现在从括号中提取中文名(如 `程冬芳`)搜索,避免空格问题。无括号时提取连续中文字符。
 - **`runLarkCli` 强制走 @file 模式**:所有 JSON payload(含中文字段名如 `面试官 (人员 )`)一律写入临时文件用 `@./file.json` 引用,不走命令行内联。Windows `spawn` + `shell:true` 会经过 cmd.exe 编码链路,把 UTF-8 中文字段名转成 GBK 导致 `invalid character` 解析错误。
-- **`tripyoyo-feishu-cli` 的 `run` API 是更干净的替代方案**:如果 Agent 需要手动回填(如 artifact URL 回填),应直接用 `tripyoyo-feishu-cli` 的 `run` API 调 `lark-cli base +record-upsert`,它内部以 argv 数组传递参数,绕过 cmd.exe,UTF-8 全程不破坏,连 @file 都不需要。
 
 **成功判定**:退出码 0 且 stdout JSON `ok === true` 且 `failed === 0`。`unresolvedNames` 可以非空——`search-user` 找不到的姓名会挂在里面,不算 fatal,该 record 若还有其他姓名解析成功,人员列会**部分回填**;所有姓名都解析不上的 record 会归到 `skipped`,人员列继续留空。
 
@@ -481,7 +471,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 最后汇报:
 
 - 校招、社招分别是否导出成功、合并后总条数(默认模式入口只汇报默认模式一份)
-- 本次评分成功/失败/跳过的记录数,HTML artifact 发布成功/失败数
+- 本次评分成功/失败/跳过的记录数，HTML Drive 上传成功/失败数
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
 - 面试官(人员)回填结果: `backfilled` / `skipped` / `failed`,若有 `unresolvedNames` 逐个列出(仅姓名,不带 open_id)
@@ -494,75 +484,16 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 
 ## 成功路径 Runbook(定时任务作业模板)
 
-以下是**一次成功的定时任务**从头到尾的骨架命令。**变更任何一步之前先对着这里核对**——真实定时任务的问题基本都是偏离了这套骨架。
+以下是一次成功的定时任务骨架。定时提示词只需调用本 skill；报告阶段由本 skill 强制调用 `interviewer-review`，不需要也不得在定时提示词中再选第二个 skill。
 
-**共同前置**(每次入口第一件事就做,不能省):
+1. 解析本 skill 与 `interviewer-review` 的绝对目录，确认后者的原版 `SKILL.md`、统计、渲染、校验和模板均存在。
+2. 定位 lark-cli；Windows 上设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`。
+3. 默认模式执行 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`；全模式依次 CDP 自检、校招覆盖、社招合并，期间不写飞书。
+4. 遍历 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
+5. 按 record 串行将通过校验的 `review-<interviewId>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
+6. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
 
-1. 解析并保存 Skill 绝对路径:所有后续命令用 `<Skill目录>/scripts/xxx.mjs`,**不用**相对路径 `scripts/xxx.mjs`(宿主 shell 的 cwd 不在 skill 目录)。
-2. 解析 lark-cli 绝对路径:Windows `where lark-cli`,macOS/Linux `which lark-cli`。所有 `.mjs` 都追加 `--lark-cli "<路径>"`。
-3. Windows 上执行 Node/Python 前设 `chcp 65001` 并注入 `PYTHONIOENCODING=utf-8`。禁止在 PowerShell 里用 `&&` 串命令,一行一条。
-4. **禁止 Agent 直接调 `lark-cli` 写入/上传/删除**。只允许调 skill 自带的 `.mjs` 包装脚本——它们已经内嵌了字段类型兼容、@file 相对路径、失败降级、错误汇总。
-
-**默认模式骨架**:
-
-```text
-# 1. 覆盖导出
-opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json
-
-# 2. 遍历 records[] 评分 + 生成报告(generate-report.mjs 一键完成) + 发布 artifact + 回填 JSON
-#    Agent 读逐字稿打分,把 scores/highlights/improves/advice 传给脚本
-#    注意:用 wrapper .cjs 脚本从文件读取 JSON 参数传给 generate-report.mjs,避免 --scores-file 的
-#    fs.readFileSync bug 和命令行长度问题
-node "<Skill目录>/scripts/generate-report.mjs" \
-  --json "<PATH>" --interview-id "<id>" \
-  --scores-file "<scores.json>" --badge-line "..." \
-  --highlights-file "<highlights.json>" --improves-file "<improves.json>" --advice-file "<advice.json>"
-
-# 2b. 发布 artifact(每条报告逐个或用 callSubAgent 并行)
-#     读取 HTML → 在对话中输出 <lobeArtifact> 标签 → 调用 publishArtifact → 获得公开 URL
-#     多份报告可用 callSubAgent 并行,每个子代理 timeout 120s
-
-# 2c. 回填 artifact URL 到飞书 Base(所有 artifact 发布完成后)
-#     用 tripyoyo-feishu-cli 的 run API: base +record-upsert --json @./file.json
-#     必须用 run API,不要用 Node spawn + shell:true
-
-# 3. 单次批量写入(整个流水线只调一次)
-node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<PATH>" --lark-cli "<lark-cli 绝对路径>"
-
-# 4. 去重(保留最新)
-node "<Skill目录>/scripts/deduplicate-lark-base.mjs" --lark-cli "<lark-cli 绝对路径>"
-
-# 5. 回填「面试官(人员)」列(dedup 之后, 只填留下的最新一条)
-node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --lark-cli "<lark-cli 绝对路径>"
-```
-
-**全模式骨架**:
-
-```text
-# 1. CDP 自检
-opencli moka status -f json
-
-# 2. 校招覆盖(不 sync)
-opencli moka mode campus -f json
-opencli moka export-transcripts --output "<PATH>" --overwrite -f json
-
-# 3. 社招合并(不加 --overwrite,不 sync)
-opencli moka mode social -f json
-opencli moka export-transcripts --output "<PATH>" -f json
-
-# 4~7 = 默认模式 2~5
-```
-
-**成功判定**(每一步必须核对,不能只看"命令有输出"):
-
-| 步骤 | 判定 |
-|---|---|
-| export-transcripts | 退出码 0 且 JSON 顶层 `ok:true` 且 `records.length > 0`(为 0 时汇报"今日无记录",不算失败) |
-| generate-report.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `remainingTokens === 0` 且 `hasIconSrc === false` |
-| artifact 发布 | 拿到 `https://` 开头的公开 URL（badge 和 logo 均为纯 CSS，无外部依赖） |
-| sync-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true` **并且** `created === deduplicatedRecords` **并且** `failed === 0`。**旧版本 sync 会在有失败时误报 ok:true,新版本已收紧;若字段缺失说明脚本没更新。** |
-| deduplicate-lark-base.mjs | 退出码 0 且 stdout JSON `ok:true`(失败不阻塞汇报,但要在汇总里带上 `failed`/`errors`) |
-| backfill-interviewer-user.mjs | 退出码 0 且 stdout JSON `ok:true` 且 `failed===0`。`unresolvedNames` 可以非空(search-user 找不到的姓名),`skipped` 也可以非空(所有姓名都解析不上的 record),都不算 fatal;把摘要附到汇总即可 |
+**成功判定**：导出、报告校验、每份 Drive 上传、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告或上传失败不阻断其他记录，但必须在汇总中体现。
 
 ## 错误速查表(先查表,不要瞎猜)
 
@@ -579,18 +510,18 @@ opencli moka export-transcripts --output "<PATH>" -f json
 
 | 现象 | 根因 | 处置 |
 |---|---|---|
-| `python transcript_stats.py` 报 `UnicodeDecodeError` / stdout 空 | Windows 默认 GBK,脚本 stdout 是 GBK,Python 强解 UTF-8 崩 | 执行前 `chcp 65001`;或在 spawn 时设 `PYTHONIOENCODING=utf-8`。**skill 内的 .mjs 已经处理**,只有 Agent 手动调 Python 才踩 |
+| `interviewer-review` 的 Python 脚本输出乱码或 JSON 为空 | Windows 默认编码与 Python 输出编码不一致 | 执行前设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`，再按原版 skill 的命令重跑；不得改写其统计或渲染脚本 |
 | `python -c "f'{...}'"` 单行崩 SyntaxError | PowerShell 引号转义与 Python f-string 冲突 | **禁止 `python -c` 单行运行任何含 f-string 或多语句的代码**;写到 `.py` 临时文件再跑 |
 | `node "scripts/xxx.mjs"` 找不到脚本 | 宿主 execScript 的 cwd 不在 skill 目录 | **一律用绝对路径** `node "<Skill目录>/scripts/xxx.mjs"`。共同前置第 1 步就是干这个的 |
 | 手误 `D:` 打成 `E:` | 无 | 每一次 execScript 之前肉眼核对盘符 |
 
-### Artifact 发布阶段
+### 报告与云盘阶段
 
 | 现象 | 根因 | 处置 |
 |---|---|---|
-| 报告文件名带 `**` 或中文,`Errno 22 Invalid argument` | Windows 文件名禁用 `**`,中文在部分 Node/Python 版本上编码不稳 | 报告/临时文件名**只用 ASCII**:`review-<interviewId>.html`、`transcript-<interviewId>.txt`。候选人姓名放在 **HTML 内容里**即可,不进文件名(纯技术原因,不是脱敏要求) |
-| 打开 artifact URL 后 badge 图标是"图片破损" | CSS 类名拼写错误或模板中 badge CSS 块缺失 | 检查 HTML 中 `badge-` 前缀的 CSS 类名与 `{{BADGE_ICON}}` 值是否一致;确认模板 `</style>` 前有 7 档 badge CSS 定义 |
-| HTML 里残留 `{{TOKEN}}` | 有 token 未替换 | 发布前 grep `{{[A-Z_]+}}`,除模板 header 注释里的字面量,不应有剩余;有剩余就补齐再发布 |
+| 原版校验脚本失败 | `analysis.json`、证据或 HTML 结构不符合 `interviewer-review` 契约 | 修正 analysis 后重新调用原版渲染和校验；校验未通过不得上传或写 URL |
+| Drive 上传失败或缺少 scope | lark-cli 用户身份没有 Drive 上传权限，或目标目录无权限 | 中断后续写入并汇报，需要 HR 在首次配置入口补充 Drive 用户授权；定时任务不弹授权二维码 |
+| 上传响应没有真实 URL | 上传结果不完整或 Agent 未能提取可访问链接 | 视为该条失败，保留本地 HTML，不猜测或拼接 URL |
 
 ### Base 写入阶段(最容易掉链子)
 
@@ -608,12 +539,10 @@ opencli moka export-transcripts --output "<PATH>" -f json
 
 | 现象 | 根因 | 处置 |
 |---|---|---|
-| `lark-cli.cmd` 直接调,中文字段名走 `\uXXXX` 转义后 field_not_found | Windows 命令行 UTF-8 传参编码链条太脆 | **禁止 Agent 直接调 lark-cli 写数据**。所有写入/删除/上传统一走 skill 提供的 `.mjs` 脚本;它们已经封好了编码、@file、字段兼容 |
+| 用 lark-cli 内联 JSON 写 Base 字段时 field_not_found | Windows 命令行 UTF-8 传参编码链条太脆 | **禁止 Agent 直接调 lark-cli 写 Base 数据或删除记录**；只调 skill 提供的 `.mjs` 脚本。唯一例外是本流程规定的 `drive +upload`，它只传 ASCII 文件名和 folder token，不传中文 JSON 字段 |
 | Python `subprocess.run(lark_cli, encoding='utf-8')` stdout 是空的 | lark-cli 输出是 GBK,Python 强解 UTF-8 报错并把 stdout 吞了 | 别自己起 Python 调 lark-cli;直接调本 skill 的 `.mjs`(内部用 `spawn` + `setEncoding('utf8')` 已经处理) |
 | `backfill-interviewer-user.mjs` 的 `search-user` 报 `positional arguments are not supported` | 姓名格式 `Iris Cheng （程冬芳）` 中的空格被 lark-cli 拆成位置参数 | **已修复**:脚本从括号中提取中文名搜索,不再用完整姓名 |
-| `backfill-interviewer-user.mjs` 的 `record-upsert` 报 `invalid character 'é'` | Windows `spawn` + `shell:true` 经 cmd.exe 编码链路,中文字段名 `面试官 (人员 )` 被转成 GBK | **已修复**:脚本对所有 JSON payload 强制走 `@file` 模式;或用 `tripyoyo-feishu-cli` 的 `run` API 绕过 cmd.exe |
-| `generate-report.mjs` 的 `--scores-file` 报 `fs.readFileSync is not a function` | 脚本 `import { promises as fs }` 但 `readJsonArg` 用了同步 `fs.readFileSync`(promises 模块没有同步 API) | **已修复**:新增 `import fsSync from "node:fs"`,`readJsonArg` 改用 `fsSync.readFileSync` |
-| Artifact `<lobeArtifact>` 标签不被系统捕获,`publishArtifact` 报 `ARTIFACT_NOT_FOUND` | 对话上下文过长导致标签被截断或未被解析 | 在新对话中发布,或用 `callSubAgent` 派发子代理(每个子代理上下文短,标签能被正确捕获);HTML 必须是纯 CSS 自包含(无 base64 图片),体积 ≤30KB |
+| `backfill-interviewer-user.mjs` 的 `record-upsert` 报 `invalid character 'é'` | Windows `spawn` + `shell:true` 经 cmd.exe 编码链路,中文字段名 `面试官 (人员 )` 被转成 GBK | **已修复**:脚本对所有 JSON payload 强制走 `@file` 模式 |
 
 ### 汇报
 
@@ -627,7 +556,8 @@ opencli moka export-transcripts --output "<PATH>" -f json
 
 - [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
-- [ ] **不直接调 `lark-cli`** 写入、删除——只调 skill 提供的 4 个 `.mjs`(generate-report / sync / dedup / backfill-interviewer-user)。HTML 报告由当前 Claude 就地发布 artifact。
+- [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
+- [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。
 - [ ] 报告与临时文件名**只用 ASCII**(`review-<id>.html`、`transcript-<id>.txt`),姓名放在 HTML 内容里(纯技术兼容要求,不是脱敏)。
 - [ ] 大 JSON 结构探查用 `.cjs` 脚步文件,不用 `grep` / `Read` / `node -e` / `python -c` 硬碰。
@@ -641,7 +571,7 @@ opencli moka export-transcripts --output "<PATH>" -f json
 - 只访问当前登录账号有权查看的数据。
 - 不使用 mitmproxy 完成日常采集；不要求用户提供抓包或凭证。
 - 不把 JSON 数据文件写进插件仓库或 Skill 目录。
-- 只把候选人数据写入本 Skill 固定配置的飞书 Base；不上传或发送到其他位置。
+- 候选人结构化数据只写入本 Skill 固定配置的飞书 Base；最终校验通过的 HTML 仅上传到固定 Drive folder `NY5IfFoh5lQmIaddwoSc6oJznBc`，不上传或发送到其他位置。
 - 对话汇报、自动化摘要、错误信息和调试日志中**不要输出**手机号、邮箱、身份证号或逐字稿正文。候选人及面试官**姓名可直接原文使用**——数据源是授权 HR 采集,姓名不做处理。
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
 - 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。

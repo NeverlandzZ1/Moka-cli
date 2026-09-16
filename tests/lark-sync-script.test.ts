@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const scriptPath = path.join(repoRoot, "skills", "moka-transcript-getter", "scripts", "sync-lark-base.mjs");
+const scriptPath = path.join(repoRoot, "skills", "moka-transcript", "scripts", "sync-lark-base.mjs");
 const mockCliPath = path.join(repoRoot, "tests", "fixtures", "mock-lark-cli.mjs");
 const tempDirs: string[] = [];
 

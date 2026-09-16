@@ -1,10 +1,10 @@
-# 打包 moka-transcript-getter skill 为 zip，忽略 agents 目录
+# 打包 moka-transcript skill 为 zip，忽略 agents 目录
 import os
 import sys
 import zipfile
 from pathlib import Path
 
-SKILL_DIR_NAME = "moka-transcript-getter"
+SKILL_DIR_NAME = "moka-transcript"
 IGNORE_DIRS = {"agents"}
 
 

@@ -97,7 +97,7 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 | 是否标红 | 由 `reviewScores.redLineHits` 派生 | 单选选项名字符串,严格「是」/「否」,不带空格。`redLineHits` 数组非空 → 「是」,否则 → 「否」;评分未跑(无 `reviewScores` 与 `reviewError`)时传 null,不占列 |
 | 是否已通知 | 由本流水线固定值 | 单选选项名字符串,固定写「否」;后续人工/其他流程负责翻为「是」,不在本流水线职责内。评分未跑时传 null |
 
-> 六维复盘字段的评分锚点见 [`interviewer-review-workflow.md`](interviewer-review-workflow.md)。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与文本列允许空,不影响其他列写入。
+> 六维复盘字段、红线判定与 HTML 校验以独立的 `interviewer-review` skill 为唯一真源。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与文本列允许空,不影响其他列写入。
 > **「是否标红」「是否已通知」是飞书单选列**(不是复选/多选)。写入值必须与 Base 上选项名**逐字节相等**——多一个空格或写成半角字母都会被飞书拒收或落成新选项。当前脚本硬编码「是」/「否」两个字面量,若有人在 Base 上把选项名改了,先在 Base 侧改回来,不改脚本。
 > **「面试复盘报告」列在飞书 Base 里必须是「文本」或「超链接」类型**(不能是「附件」)。当前 `asOptionalUrl()` 把合法 URL 直接返回**裸字符串**,`+record-batch-create` payload 里作为文本值写入,飞书文本列/超链接列都接受该格式。若真实写入报"URL 列类型不匹配",先在飞书 Base 界面把该列类型改为「文本」而不是回来改脚本。
 > 「处理状态」列不在本流水线的写入范围内。「面试官(人员)」列由 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填,失败或姓名解析不上时该列留空,不影响 sync 本步已写入的其他列。
@@ -226,7 +226,6 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
    - **Windows 兼容修复**(2026-09-14):`search-user` 的查询词现在从姓名中提取括号内的中文名(如 `Iris Cheng （程冬芳）` → `程冬芳`),避免完整姓名中的空格被 lark-cli 拆成位置参数报错。无括号时提取连续中文字符。
 4. **逐条 upsert**:`+record-upsert --record-id X --json @./payload-file.json`。默认 3 并发。**不用** `+record-batch-update` — 那是同值批量更新,每条 record 的人员不同,必须逐条。
    - **Windows 兼容修复**(2026-09-14):所有 JSON payload(含中文字段名 `面试官 (人员 )`)现在强制写入临时文件用 `@./file.json` 引用,不走命令行内联。Windows `spawn` + `shell:true` 会经过 cmd.exe 编码链路,把 UTF-8 中文字段名转成 GBK 导致 `invalid character` 解析错误。`@file` 模式让 lark-cli 从 UTF-8 文件读取,绕过编码问题。
-   - **更干净的替代方案**:Agent 手动回填(如 artifact URL 回填)时,直接用 `tripyoyo-feishu-cli` 的 `run` API 调 `lark-cli base +record-upsert`,它内部以 argv 数组传递参数,绕过 cmd.exe,UTF-8 全程不破坏,连 @file 都不需要。
 
 ### 姓名拆分
 
@@ -281,8 +280,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 | 人员列显示名找不到唯一列 | Base 上有多列同时归一化到「面试官(人员)」 | 脚本直接报错。回飞书 Base 把重复列改掉,不改脚本 |
 | `+record-upsert` 报"字段类型不匹配" | 有人把「面试官(人员)」列改成了 text 类型 | 回飞书 Base 把该列改回 user(人员)类型,不改脚本 |
 | `search-user` 报 `positional arguments are not supported (got ["Cheng" "（程冬芳）"])` | 姓名中的空格被 lark-cli 拆成位置参数 | **已修复**:脚本从括号中提取中文名搜索,不再用完整姓名 |
-| `record-upsert` 报 `invalid character 'é'` | Windows spawn + shell:true 经 cmd.exe 编码链路,中文字段名被转 GBK | **已修复**:脚本对所有 JSON payload 强制走 @file 模式;或用 `tripyoyo-feishu-cli` 的 `run` API 绕过 cmd.exe |
-| `generate-report.mjs` 的 `--scores-file` 报 `fs.readFileSync is not a function` | 脚本 `import { promises as fs }` 但 `readJsonArg` 用了 `fs.readFileSync`(promises 模块没有同步 API) | **已修复**:新增 `import fsSync from "node:fs"`,`readJsonArg` 改用 `fsSync.readFileSync` |
+| `record-upsert` 报 `invalid character 'é'` | Windows spawn + shell:true 经 cmd.exe 编码链路,中文字段名被转 GBK | **已修复**:脚本对所有 JSON payload 强制走 `@file` 模式 |
 | 大批量姓名走 `contact +search-user` 触发限流 | contact API 有 QPS 限制 | 脚本内部已经串行调用 contact,若仍限流,把 `--concurrency` 降到 1(只影响 upsert 阶段);实在解决不了拆分批次跑 |
 
 
