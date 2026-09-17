@@ -379,7 +379,9 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 遍历已完成后处理-0 预筛的 `<绝对输出路径>` 的 `records[]`：
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
+- **批量执行策略**：多条记录时，可将"读逐字稿 → 统计(`transcript_stats.py`) → 分析 → 写 `analysis.json`"分派给子代理**并行**处理，每条一个子代理。但 `render_report.py` + `validate_report.py` + 修错重试由本 Agent **串行**执行——渲染校验是确定性脚本调用，串行跑只需一两分钟，且修错时 Agent 对校验器报错模式已熟悉，效率更高。子代理返回后**必须检查 `analysis.json` 是否存在且内容完整**（含 `radar`、`highlights`、`improvements`、`evidence_turn_indices`）；空结果或缺失文件时自行接管该条的全链路，不停顿。
 - 对每条处理记录，按 `interviewer-review/SKILL.md` 和其 `references/` 完成：逐字稿统计 → 阅读逐字稿 → 产出符合 `report-contract.md` 的 `analysis.json` → 调用**原版** `render_report.py` → 调用**原版** `validate_report.py`。
+- **脚本和模板必须通过 `execScript` 调用**（`execScript` 会自动提供 skill 资源并以 skill 目录为 cwd）。不要用 `runCommand` + 本地绝对路径绕过——本地可能存在多个 skill 副本，版本不可靠。遇到 Windows PowerShell `&&` 报错时用 `cmd /c` 或 `;` 替代，不要切换工具。
 - 时间戳倒退不再阻断报告生成：`transcript_stats.py` 现在用 `raw_ts`（绝对时间）作为 `display_ts`，时间线倒退不再报 warning，`span.valid` 始终为 `true`，不需要前置检查。
 - **面试官说话人绑定**：Moka 的 `interviewerNames` 是展示姓名（如 `Jiahui Ji （季家晖）`），但转录里的 speaker 标签可能是缩写/昵称（如 `J`、`GYF`、`小雨`）。先拿 Moka 展示姓名跑一次统计，若 `binding_warnings` 非空，需从 `stats.speakers` 的 keys 里找到提问最多（`questions` 最高）的说话人作为面试官标签，用该标签重新跑统计，直到 `binding_warnings` 为空。`interviewer_speakers` 必须写转录统计 JSON 中存在的 speaker 标签，不是 Moka 展示姓名。
 - 原始字段映射固定为：`candidateName → metadata.candidate`，`interviewerNames（按「、」连接）→ metadata.interviewer`，`jobTitle → metadata.position`，`roundName → metadata.round`，`startTime → metadata.date`，`transcript → 统计输入`。候选人和面试官展示姓名必须直接取 record 的结构化字段，**不得**从转录内容猜测。`interviewer_speakers` 则必须使用统计结果中出现的 speaker 标签，只用于角色绑定、KPI 与证据校验，不得用真实展示姓名替代。
@@ -605,6 +607,8 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
 - [ ] backfill-interviewer-user.mjs 在 dedup 之后执行,失败/`unresolvedNames`不阻塞汇报,把摘要附到汇总即可。
 - [ ] 出现任何写入失败**不重跑整个流水线**——把 `errors` 附到汇总,让 HR 决定。
+- [ ] **批量报告生成策略**：子代理只承担"读逐字稿→分析→写 analysis.json"，渲染和校验由自己串行跑。子代理返回后必须检查 analysis.json 完整性，空结果则自行接管，不停顿。
+- [ ] **interviewer-review 的脚本和模板必须通过 `execScript` 调用**，不用 `runCommand` + 本地路径。Windows `&&` 报错用 `cmd /c` 或 `;` 替代，不换工具。
 
 
 
