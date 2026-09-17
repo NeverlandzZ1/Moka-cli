@@ -1,0 +1,24 @@
+skills/moka-transcript/SKILL.md
+  s_84fa8680e37da6::t_9ae859926726f9 515-516
+  s_84fa8680e37da6::t_c8ca1d27299752 40,300,352,356-373,379,437-438,494,513-514,594
+skills/moka-transcript/references/lark-base-write.md
+  s_84fa8680e37da6::t_c8ca1d27299752 36,41-50,173-174
+skills/moka-transcript/scripts/filter-notified-records.mjs
+  s_84fa8680e37da6::t_53d9c4567a5a90 1-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.44-trip",
+  "base_commit_sha": "a57e05f591fc9e41679489d63ad6179c882b676f",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
