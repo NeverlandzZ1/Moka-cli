@@ -37,6 +37,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 执行 Agent：`当前助手自身`
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
+- 已通知预筛脚本：`scripts/filter-notified-records.mjs`（只读 Base；在评分前按「申请ID + 面试ID」过滤 `是否已通知=是` 的记录）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列；**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
 - 脚本契约：`references/lark-base-write.md`
@@ -296,7 +297,7 @@ opencli moka export-transcripts --offline --output "<绝对输出路径>" --over
 
 ### 2. 共用后处理
 
-导出成功后，走 [`## 共用后处理`](#共用后处理) 的六段流程（原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
+导出成功后，走 [`## 共用后处理`](#共用后处理) 的七段流程（已通知预筛 + 原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
 
 ## 定时采集入口 · 全模式
 
@@ -348,17 +349,34 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 
 ### 4. 共用后处理
 
-校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的六段流程（原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时分别标注校招/社招导出条数、合并后总数。
+校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的七段流程（已通知预筛 + 原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时分别标注校招/社招导出条数、合并后总数。
 
 ## 共用后处理
 
-两个定时入口在拿到「今天全量 JSON」后，共享以下六段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**，避免全模式重复写入。
+两个定时入口在拿到「今天全量 JSON」后，共享以下七段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**，避免全模式重复写入。
+
+### 后处理-0. 已通知记录预筛（必须先执行）
+
+在调用 `interviewer-review` 前，先执行：
+
+```text
+node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出路径>"
+```
+
+若 `lark-cli` 不在 PATH，追加 `--lark-cli "<路径>"`。
+
+该脚本只读目标 Base 的「申请ID」「面试ID」「是否已通知」三列：本次 JSON 中任一 record 只要与 Base 内一行的 **申请ID 和面试ID都相同**，且该行「是否已通知」严格为「是」，便从 JSON 的 `records[]` 直接移除。被移除的 record **不得**进入评分、HTML 渲染、Drive 上传、sync、dedup 或人员回填；这是防止通知工作流对同一面试再次发信的第一道保护。
+
+- 以脚本 stdout 的 `skippedAlreadyNotified` 作为本次预筛跳过数；`remainingRecords` 为后续唯一允许处理的 records 数。
+- `申请ID` 或 `面试ID` 缺失的 record 不匹配任何已通知记录，保留并按原流程处理。
+- Base 缺少任一所需字段、lark-cli 查询失败、或脚本输出 `ok !== true` 时，**立即中断本次定时任务**；不得跳过预筛、不得依赖后置 dedup 补救。
+- 预筛只在两个定时入口执行。普通配置入口不读取 Base 历史记录，也不调用本脚本。
 
 ### 后处理-1. 调用原版 `interviewer-review` 生成并校验本地 HTML
 
 这是定时任务的**唯一**报告生成路径。先定位已安装的 `interviewer-review` skill；若宿主未安装、当前 Agent 无法读取其 `SKILL.md`、或其 `scripts/transcript_stats.py` / `render_report.py` / `validate_report.py` / `assets/report-template.html` 缺失，则中断本次任务，明确报“interviewer-review 报告引擎不可用”，不得改用旧生成器、手写 HTML 或简化模板。
 
-遍历 `<绝对输出路径>` 的 `records[]`：
+遍历已完成后处理-0 预筛的 `<绝对输出路径>` 的 `records[]`：
 
 - 跳过 `transcriptStatus !== "available"` 或 `transcript` 去空后为空的记录。
 - 对每条处理记录，按 `interviewer-review/SKILL.md` 和其 `references/` 完成：逐字稿统计 → 阅读逐字稿 → 产出符合 `report-contract.md` 的 `analysis.json` → 调用**原版** `render_report.py` → 调用**原版** `validate_report.py`。
@@ -416,8 +434,8 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 去重规则:
 
-- 面试转写表: 按「面试ID + 申请ID」联合键去重,**保留每组最新一条**(record_id 倒序遍历下先命中的一条),删除其余。
-- **为什么保留最新**: 每天 sync 会追加当天带评分和 HTML URL 的新记录,如果保留最旧,反而会删掉刚生成的评分把无评分的旧记录留下。
+- 面试转写表: 按「面试ID + 申请ID」联合键去重。若组内有「是否已通知=是」，优先保留已通知行（多个已通知行时保留其中最新一条）；只有全为「否」时才保留最新一条。
+- 预筛已经避免把已通知面试再次写入；本步骤仍保留该优先级，作为 Base 历史重复数据的安全兜底，绝不能让新写入的「否」覆盖已通知的「是」。
 - 面试ID 或申请ID 为 null 的空行跳过,不参与去重。
 
 删除策略(关键设计):
@@ -473,7 +491,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 
 最后汇报:
 
-- 校招、社招分别是否导出成功、合并后总条数(默认模式入口只汇报默认模式一份)
+- 校招、社招分别是否导出成功、合并后总条数(默认模式入口只汇报默认模式一份)，以及因「是否已通知=是」预筛跳过数
 - 本次评分成功/失败/跳过的记录数，HTML Drive 上传成功/失败数
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
@@ -492,9 +510,10 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 1. 解析本 skill 与 `interviewer-review` 的绝对目录，确认后者的原版 `SKILL.md`、统计、渲染、校验和模板均存在。
 2. 定位 lark-cli；Windows 上设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`。
 3. 默认模式执行 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`；全模式依次 CDP 自检、校招覆盖、社招合并，期间不写飞书。
-4. 遍历 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
-5. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
-6. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
+4. 先运行 `filter-notified-records.mjs`，仅保留 Base 中不存在相同「申请ID + 面试ID」且「是否已通知=是」历史行的 records；预筛失败立即中断。
+5. 遍历预筛后的 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
+6. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
+7. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
 
 **成功判定**：导出、报告校验、每份 Drive 上传、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告或上传失败不阻断其他记录，但必须在汇总中体现。
 
@@ -572,6 +591,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。**注意 moka-transcript 和 interviewer-review 是两个不同的 skill 目录**,各自的 `.mjs`/`.py` 用各自目录的绝对路径。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
 - [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
+- [ ] 已在报告前运行 `filter-notified-records.mjs`；仅将 `remainingRecords` 交给后续链路。任何同「申请ID + 面试ID」且 Base「是否已通知=是」的 record 必须完全跳过。
 - [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。上传成功后立即转移 owner 给 Julia Tian（open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`）。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。Windows 上用 `python` 而非 `python3`。
 - [ ] **禁止用 PowerShell `>` 或 `Set-Content -Encoding UTF8` 保存 Python stdout 生成的 JSON**（会加 BOM）；用 Python 子进程 `capture_output` + `open('w',encoding='utf-8')` 或 Node.js `fs.writeFileSync('utf-8')`。

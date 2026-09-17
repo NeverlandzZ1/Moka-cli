@@ -33,9 +33,20 @@
 
 | 脚本 | 职责 | 调用方式 |
 |---|---|---|
+| `filter-notified-records.mjs` | 定时报告前只读 Base，过滤已通知的联合键 | `node filter-notified-records.mjs --input <json>` |
 | `sync-lark-base.mjs` | 输入去重 → 批量写入面试转写 | `node sync-lark-base.mjs --input <json>` |
 | `deduplicate-lark-base.mjs` | 飞书端去重清理：拉全表 → 找重复 → 逐条删除 | `node deduplicate-lark-base.mjs` |
 | `backfill-interviewer-user.mjs` | dedup 之后运行,把「面试官」text 列的姓名解析为 open_id,回填「面试官(人员)」user 列 | `node backfill-interviewer-user.mjs` |
+
+## filter-notified-records.mjs
+
+仅用于**定时任务的报告前**。它读取本次 Moka JSON 和 Base 中的「申请ID」「面试ID」「是否已通知」三列；若 Base 存在同一 `applicationId + interviewId` 且通知值为严格「是」的行，即从本地 JSON 的 `records[]` 删除该条。脚本不写 Base、不删 Base 记录。
+
+```text
+node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<transcript.json绝对路径>"
+```
+
+它就地重写 JSON，并输出 `skippedAlreadyNotified` 与 `remainingRecords`。字段缺失或飞书查询失败时必须失败退出；调用方不得绕过，因为后续流程会把新记录默认写成「否」。
 
 ## sync-lark-base.mjs
 
@@ -159,8 +170,8 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 ### 去重规则
 
-1. **面试转写表**：按「面试ID + 申请ID」联合键去重（两个值同时相同才算重复），**保留每组最新一条**（record_id 倒序遍历下先命中的那条），删除其余
-2. **为什么保留最新**：每天 sync 会追加当天带评分和 HTML URL 的新记录，如果保留最旧反而会删掉当天新增的评分数据；倒序保留最新等价于保留"最近一次带评分的完整记录"
+1. **面试转写表**：按「面试ID + 申请ID」联合键去重（两个值同时相同才算重复）。组内任意一行「是否已通知=是」时，优先保留已通知行；多个「是」时保留最新一条。全为「否」时才保留最新一条。
+2. **为什么仍有去重**：报告前预筛会拦截已经通知过的联合键；此处负责清理历史重复，并再次保证刚 sync 的「否」不会取代已通知的「是」。
 3. **空行跳过**：面试ID 或申请ID 为 null 的记录不参与去重，不会被删除
 
 ### 输出
