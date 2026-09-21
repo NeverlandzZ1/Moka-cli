@@ -4,12 +4,17 @@ import { ArgumentError } from "@jackwener/opencli/errors";
 
 // src/constants.ts
 var MOKA_ORIGIN = "https://app.mokahr.com";
+var MOKA_PASSPORT_ORIGIN = "https://passport.mokahr.com";
 var MOKA_OVERVIEW_URL = `${MOKA_ORIGIN}/interviews/overview`;
 var API_PATHS = {
   updateCurrentHireMode: "/api/users/update_currenthiremode_fields",
   interviewList: "/api/outer/ats-interview/interview/hr/interviewList",
   interviewCard: "/api/outer/ats-interview/interview/interviewCard",
   meetingSummary: "/api/outer/ats-interview/interview/meeting/getMeetingSummary"
+};
+var AUTH_API_PATHS = {
+  passportTicket: "/api/outer/moka-unified-account/mokaUid/ticket",
+  unifiedLogin: "/api/outer/moka-unified-account/mokaUid/uniLogin"
 };
 var DEFAULT_CDP_PORT = 9222;
 
@@ -915,6 +920,11 @@ var DEFAULT_HEADERS = {
   "referer": `${MOKA_ORIGIN}/interviews/overview`,
   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 };
+var PASSPORT_HEADERS = {
+  ...DEFAULT_HEADERS,
+  "origin": MOKA_ORIGIN,
+  "referer": `${MOKA_PASSPORT_ORIGIN}/passport/unified.html`
+};
 function collectSetCookieHeaders(headers) {
   const rawGetter = headers.getSetCookie;
   if (typeof rawGetter === "function") return rawGetter.call(headers);
@@ -930,18 +940,19 @@ function createHttpClient(options = {}) {
       "\u672C\u5730\u6CA1\u6709\u53EF\u7528\u7684 Moka \u767B\u5F55\u6001\u3002\u8BF7\u5148\u8FD0\u884C opencli moka login \u8BA9 CDP Chrome \u767B\u5F55\u4E00\u6B21\u3002"
     );
   }
-  const host = new URL(MOKA_ORIGIN).host;
-  async function fetchJson(path, opts = {}) {
+  const passportHost = new URL(MOKA_PASSPORT_ORIGIN).host;
+  async function requestJson(origin, path, opts, baseHeaders) {
     const method = opts.method ?? "POST";
-    const cookieHeader = cookieHeaderFor(host, bundle);
+    const requestHost = new URL(origin).host;
+    const cookieHeader = cookieHeaderFor(requestHost, bundle);
     if (!cookieHeader) {
       throw new AuthRequiredError2(
-        "app.mokahr.com",
-        "\u672C\u5730 Moka cookie \u5DF2\u5168\u90E8\u8FC7\u671F,\u8BF7\u91CD\u65B0\u8FD0\u884C opencli moka login \u4EE5\u5237\u65B0\u767B\u5F55\u6001\u3002"
+        requestHost,
+        `\u672C\u5730\u6CA1\u6709 ${requestHost} \u7684\u53EF\u7528 cookie\u3002\u8BF7\u66F4\u6362\u5305\u542B Moka Passport \u767B\u5F55\u6001\u7684 moka-cookies.json\uFF0C\u6216\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
       );
     }
     const headers = {
-      ...DEFAULT_HEADERS,
+      ...baseHeaders,
       ...opts.headers ?? {},
       cookie: cookieHeader
     };
@@ -960,7 +971,7 @@ function createHttpClient(options = {}) {
         redirect: "manual"
       };
       if (opts.body !== void 0) init.body = JSON.stringify(opts.body);
-      response = await fetch(`${MOKA_ORIGIN}${path}`, init);
+      response = await fetch(`${origin}${path}`, init);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new CommandExecutionError2(`Moka ${path} \u8BF7\u6C42\u5931\u8D25: ${message}`);
@@ -969,20 +980,8 @@ function createHttpClient(options = {}) {
     }
     const setCookies = collectSetCookieHeaders(response.headers);
     if (setCookies.length > 0) {
-      bundle = mergeSetCookieHeaders(bundle, setCookies, host);
+      bundle = mergeSetCookieHeaders(bundle, setCookies, requestHost);
       writeCookieBundle(bundle, cookiePath);
-    }
-    if (response.status === 401 || response.status === 403) {
-      throw new AuthRequiredError2(
-        "app.mokahr.com",
-        `Moka \u767B\u5F55\u6001\u5931\u6548: HTTP ${response.status}\u3002\u8BF7\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
-      );
-    }
-    if (response.status >= 300 && response.status < 400) {
-      throw new AuthRequiredError2(
-        "app.mokahr.com",
-        `Moka \u8FD4\u56DE ${response.status} \u91CD\u5B9A\u5411,\u901A\u5E38\u8868\u793A\u767B\u5F55\u6001\u5DF2\u5931\u6548\u3002\u8BF7\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
-      );
     }
     const contentType = response.headers.get("content-type") || "";
     const text = await response.text();
@@ -999,11 +998,75 @@ function createHttpClient(options = {}) {
       } catch {
       }
     }
-    if (!response.ok) {
-      const detail = isRecord(json) && typeof json.msg === "string" ? json.msg : text.trim() || response.statusText;
-      throw new CommandExecutionError2(`Moka ${path} \u5931\u8D25: HTTP ${response.status} ${detail}`);
+    return { response, text, ...json === void 0 ? {} : { json } };
+  }
+  function isLoginRequired(result) {
+    if (result.response.status === 401 || result.response.status === 403) return true;
+    if (result.response.status >= 300 && result.response.status < 400) return true;
+    if (!isRecord(result.json)) return false;
+    if (result.json.code === 401 || result.json.code === 403) return true;
+    const message = typeof result.json.msg === "string" ? result.json.msg : "";
+    return /需要登录|请先登录|未登录|登录(?:状态|态)?(?:已)?失效|unauthorized|not logged/i.test(message);
+  }
+  function assertSuccessfulResponse(result, path) {
+    if (isLoginRequired(result)) {
+      throw new AuthRequiredError2(
+        "app.mokahr.com",
+        "Moka \u5E94\u7528\u4F1A\u8BDD\u548C Passport \u767B\u5F55\u6001\u5747\u65E0\u6CD5\u6062\u590D\u3002\u8BF7\u66F4\u6362 moka-cookies.json\uFF0C\u6216\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002"
+      );
     }
-    return json ?? {};
+    if (!result.response.ok) {
+      const detail = isRecord(result.json) && typeof result.json.msg === "string" ? result.json.msg : result.text.trim() || result.response.statusText;
+      throw new CommandExecutionError2(`Moka ${path} \u5931\u8D25: HTTP ${result.response.status} ${detail}`);
+    }
+    return result.json ?? {};
+  }
+  async function refreshAppSession() {
+    const passportCookies = cookieHeaderFor(passportHost, bundle);
+    if (!passportCookies) {
+      throw new AuthRequiredError2(
+        passportHost,
+        "cookie \u6587\u4EF6\u4E2D\u6CA1\u6709\u53EF\u7528\u7684 Moka Passport \u767B\u5F55\u6001\uFF0C\u65E0\u6CD5\u5728\u65E0 CDP \u6A21\u5F0F\u4E0B\u9759\u9ED8\u7EED\u671F\u3002"
+      );
+    }
+    const ticketResult = await requestJson(
+      MOKA_PASSPORT_ORIGIN,
+      AUTH_API_PATHS.passportTicket,
+      { method: "POST", body: { bus: 10, isMobile: false } },
+      PASSPORT_HEADERS
+    );
+    const ticketData = isRecord(ticketResult.json) && isRecord(ticketResult.json.data) ? ticketResult.json.data : void 0;
+    const ticket = ticketData && typeof ticketData.ticket === "string" ? ticketData.ticket : "";
+    if (!ticketResult.response.ok || !ticket) {
+      const ticketCode = isRecord(ticketResult.json) && typeof ticketResult.json.code === "number" ? ticketResult.json.code : void 0;
+      const detail = ticketResult.response.ok && ticketCode === 0 ? "\u63A5\u53E3\u8FD4\u56DE\u6210\u529F\u4F46\u6CA1\u6709 ticket\uFF0C\u901A\u5E38\u8868\u793A\u8FD9\u4EFD Passport Cookie \u5DF2\u88AB\u9000\u51FA\u767B\u5F55\u6216\u88AB\u670D\u52A1\u7AEF\u6CE8\u9500" : isRecord(ticketResult.json) && typeof ticketResult.json.msg === "string" ? ticketResult.json.msg : `HTTP ${ticketResult.response.status}`;
+      throw new AuthRequiredError2(
+        passportHost,
+        `Moka Passport \u767B\u5F55\u6001\u65E0\u6CD5\u6362\u53D6 ticket\uFF1A${detail}\u3002\u8BF7\u66F4\u6362 moka-cookies.json\uFF0C\u6216\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
+      );
+    }
+    const loginResult = await requestJson(
+      MOKA_ORIGIN,
+      AUTH_API_PATHS.unifiedLogin,
+      { method: "POST", body: { ticket, bus: 10, isMobile: false } },
+      DEFAULT_HEADERS
+    );
+    const loginCode = isRecord(loginResult.json) && typeof loginResult.json.code === "number" ? loginResult.json.code : void 0;
+    if (!loginResult.response.ok || loginCode !== void 0 && loginCode !== 0) {
+      const detail = isRecord(loginResult.json) && typeof loginResult.json.msg === "string" ? loginResult.json.msg : `HTTP ${loginResult.response.status}`;
+      throw new AuthRequiredError2(
+        "app.mokahr.com",
+        `Moka \u9759\u9ED8\u767B\u5F55\u5931\u8D25\uFF1A${detail}\u3002\u8BF7\u66F4\u6362 moka-cookies.json\uFF0C\u6216\u91CD\u65B0\u8FD0\u884C opencli moka login\u3002`
+      );
+    }
+  }
+  async function fetchJson(path, opts = {}) {
+    let result = await requestJson(MOKA_ORIGIN, path, opts, DEFAULT_HEADERS);
+    if (isLoginRequired(result)) {
+      await refreshAppSession();
+      result = await requestJson(MOKA_ORIGIN, path, opts, DEFAULT_HEADERS);
+    }
+    return assertSuccessfulResponse(result, path);
   }
   return { fetchJson };
 }
@@ -1034,6 +1097,10 @@ function idArg(value, name) {
 function optionalRequestBody(value) {
   if (typeof value !== "string" || !value.trim()) return void 0;
   return parseJsonObject(value, "--request-json");
+}
+function stringOption(kwargs, kebabName, camelName) {
+  const value = kwargs[kebabName] ?? kwargs[camelName];
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
 function hireModeArg(value) {
   if (typeof value !== "string") throw new ArgumentError("mode \u5FC5\u987B\u662F campus/social \u6216\u6821\u62DB/\u793E\u62DB");
@@ -1079,11 +1146,13 @@ cli({
   columns: ["browser", "mokaLogin", "message", "pageUrl"],
   func: async (kwargs) => {
     const port = intArg(kwargs.port, DEFAULT_CDP_PORT);
+    const chromePath = stringOption(kwargs, "chrome-path", "chromePath");
+    const profileDir = stringOption(kwargs, "profile-dir", "profileDir");
     const launch = await ensureChromeWithCdp({
       port,
       url: MOKA_OVERVIEW_URL,
-      ...typeof kwargs.chromePath === "string" ? { chromePath: kwargs.chromePath } : {},
-      ...typeof kwargs.profileDir === "string" ? { profileDir: kwargs.profileDir } : {}
+      ...chromePath ? { chromePath } : {},
+      ...profileDir ? { profileDir } : {}
     });
     const status = await withMokaPage(port, async (page, bridge) => {
       const probe = await probeMokaLogin(page);

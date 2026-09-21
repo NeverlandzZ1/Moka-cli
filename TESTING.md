@@ -115,10 +115,10 @@ npm install
 ~/.opencli/mokaData/transcript.json                      默认逐字稿输出路径(HR 数据)
 ```
 
-- `moka-cookies.json` 在 `login`/`status`/`mode` 命令成功后自动刷新一次;`export-transcripts` 执行时 HTTP 响应的 `Set-Cookie` 会追加落盘,维持 session TTL。
+- `moka-cookies.json` 在 `login`/`status`/`mode` 命令成功后自动刷新一次；`export-transcripts --offline` 发现应用 session 失效时，会用其中的 Passport cookie 调用 ticket + uniLogin 静默续期，把响应中的 `Set-Cookie` 合并落盘后重试原请求。
 - `moka-interview-list-payload.json` 在首次带 CDP 的 `export-transcripts` 中通过 `discoverInterviewListPayload` 抓一次,后续 `--offline` 直接从此文件复用。
 
-**首次使用必须至少跑一次带 CDP 的流程**才能生成这两个缓存(通常就是 `opencli moka login` + 一次不带 `--offline` 的 `export-transcripts`),之后 HR 关闭 Chrome 也能靠这两个文件走纯 HTTP。
+**首次使用必须至少跑一次带 CDP 的流程**才能生成这两个缓存(通常就是 `opencli moka login` + 一次不带 `--offline` 的 `export-transcripts`),之后 HR 关闭 Chrome也能靠这两个文件走纯 HTTP。若人工切换账号，要替换完整 cookie 文件以保留 `passport.mokahr.com` / `.mokahr.com` 的登录态，不能只保留应用 session cookie。
 
 ## 5. 登录与 Chrome 回归
 

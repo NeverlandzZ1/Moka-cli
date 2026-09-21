@@ -43,6 +43,11 @@ function optionalRequestBody(value: unknown): JsonRecord | undefined {
   return parseJsonObject(value, '--request-json');
 }
 
+function stringOption(kwargs: Record<string, unknown>, kebabName: string, camelName: string): string | undefined {
+  const value = kwargs[kebabName] ?? kwargs[camelName];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 function hireModeArg(value: unknown): HireMode {
   if (typeof value !== 'string') throw new ArgumentError('mode 必须是 campus/social 或校招/社招');
   const normalized = value.trim().toLocaleLowerCase();
@@ -98,11 +103,13 @@ cli({
   columns: ['browser', 'mokaLogin', 'message', 'pageUrl'],
   func: async (kwargs) => {
     const port = intArg(kwargs.port, DEFAULT_CDP_PORT);
+    const chromePath = stringOption(kwargs, 'chrome-path', 'chromePath');
+    const profileDir = stringOption(kwargs, 'profile-dir', 'profileDir');
     const launch = await ensureChromeWithCdp({
       port,
       url: MOKA_OVERVIEW_URL,
-      ...(typeof kwargs.chromePath === 'string' ? { chromePath: kwargs.chromePath } : {}),
-      ...(typeof kwargs.profileDir === 'string' ? { profileDir: kwargs.profileDir } : {}),
+      ...(chromePath ? { chromePath } : {}),
+      ...(profileDir ? { profileDir } : {}),
     });
     const status = await withMokaPage(port, async (page, bridge) => {
       const probe = await probeMokaLogin(page);

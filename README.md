@@ -157,6 +157,8 @@ opencli moka export-transcripts --offline `
 
 `--offline` 会读取 `~/.opencli/mokaData/moka-cookies.json` 里缓存的登录态直接发 HTTP,不再拉起 Chrome。适用于定时任务无人值守场景。
 
+如果 Moka 应用侧的短期 session 已失效，插件会自动使用同一文件中的 Passport cookie 换取一次性 ticket，静默登录并把新 session 写回原 cookie 文件，然后重试原请求。这个续期过程同样不连接 CDP。手动更换登录态时必须替换完整的 `moka-cookies.json`，不能只复制 `app.mokahr.com` 下的几个 cookie，否则缺少 Passport 登录态就无法静默续期。
+
 只有全模式(需要切换校招/社招)必须带 CDP,不能加 `--offline`:
 
 ```powershell
@@ -166,7 +168,7 @@ opencli moka mode social -f json
 opencli moka export-transcripts --output "..." -f json
 ```
 
-当 `--offline` 报"登录态已失效 / cookie 全部过期"时,重新执行一次 `opencli moka login` 让 CDP Chrome 完成登录,cookie 会自动刷新回磁盘。
+只有当 Passport 登录态本身也过期或被服务端撤销时，`--offline` 才会要求更换完整 cookie 文件或重新执行一次 `opencli moka login`。Passport 登录态仍有效时，普通应用 session 失效会自动恢复。
 
 ## 更新插件
 

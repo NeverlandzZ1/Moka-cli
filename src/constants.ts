@@ -1,4 +1,5 @@
 export const MOKA_ORIGIN = 'https://app.mokahr.com';
+export const MOKA_PASSPORT_ORIGIN = 'https://passport.mokahr.com';
 export const MOKA_OVERVIEW_URL = `${MOKA_ORIGIN}/interviews/overview`;
 
 export const API_PATHS = {
@@ -6,6 +7,11 @@ export const API_PATHS = {
   interviewList: '/api/outer/ats-interview/interview/hr/interviewList',
   interviewCard: '/api/outer/ats-interview/interview/interviewCard',
   meetingSummary: '/api/outer/ats-interview/interview/meeting/getMeetingSummary',
+} as const;
+
+export const AUTH_API_PATHS = {
+  passportTicket: '/api/outer/moka-unified-account/mokaUid/ticket',
+  unifiedLogin: '/api/outer/moka-unified-account/mokaUid/uniLogin',
 } as const;
 
 export const DEFAULT_CDP_PORT = 9222;

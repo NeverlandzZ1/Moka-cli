@@ -5,11 +5,11 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 
 # Moka Transcript
 
-只处理用户有权访问的 Moka 和飞书数据。通过本机 CDP Chrome 的已登录会话读取 Moka，通过 lark-cli 用户身份写入飞书 Base。
+只处理用户有权访问的 Moka 和飞书数据。首次登录及全模式切换使用本机 CDP Chrome；默认模式采集使用 CLI 持久化的登录态走纯 HTTP，并通过 lark-cli 用户身份写入飞书 Base。
 
 **凭证边界**：
 - Agent 层（对话回复、日志摘要、错误信息、临时文件名、脚本 stdout）**不得读取、复制、回显或持久化**任何 Cookie、JWT、access token、密码、验证码。
-- CLI 插件（`opencli moka`）**内部**为了支持默认模式定时任务在 Chrome 被关闭时也能采集，允许把 `.mokahr.com` 域下的 Moka session cookie 明文落盘到 `~/.opencli/mokaData/moka-cookies.json`（仅当前 OS 用户账户可读）。该文件由 CLI 内部读写，Agent 不得读取、cat、上传、转发或在对话/日志中回显该文件内容。
+- CLI 插件（`opencli moka`）**内部**为了支持默认模式定时任务在 Chrome 被关闭时也能采集，允许把 Moka 应用与 Passport 登录 cookie 明文落盘到 `~/.opencli/mokaData/moka-cookies.json`（仅当前 OS 用户账户可读）。应用 session 失效时，插件会用同一文件中的 Passport cookie 走 ticket + uniLogin 静默续期并写回新 cookie；全程无需 CDP。该文件由 CLI 内部读写，Agent 不得读取、cat、上传、转发或在对话/日志中回显该文件内容。
 
 ## 路由
 
@@ -188,7 +188,7 @@ lark-cli 授权通过后,用**选项框**让用户明确选择本次要用哪个
 
 ### 4. 确保本地 Moka 登录态存在且有效
 
-**登录态的定义就一个：**本地磁盘上有一份 Moka cookie 文件（`~/.opencli/mokaData/moka-cookies.json`,由 CLI 内部维护,Agent 只探存在性、不读文件内容)。**它和 CDP Chrome 是不是活着完全无关**——即使 Chrome 完全关闭,只要磁盘 cookie 文件在,`--offline` 采集就能跑;CDP 只是全模式切换校招/社招时才需要。所以本步骤只判断"cookie 文件在不在",CDP 的状态不参与决策。
+**本步骤对登录态只做一个安全判断：**本地磁盘是否有 Moka cookie 文件（`~/.opencli/mokaData/moka-cookies.json`,由 CLI 内部维护,Agent 只探存在性、不读文件内容)。**它和 CDP Chrome 是不是活着完全无关**——即使 Chrome 完全关闭,只要磁盘 cookie 文件存在,`--offline` 就会先尝试现有应用 session，失效时再自动使用 Passport cookie 静默续期；CDP 只是首次登录和全模式切换校招/社招时需要。所以本步骤只判断"cookie 文件在不在",CDP 的状态不参与决策。
 
 **⚠️ 不要用 `opencli moka status` 来判断"本地是否有登录态"**——那条命令是探 CDP 连接和 Moka 页面可达性的,反映的是"CDP 活着且能访问 Moka",和"磁盘上 cookie 文件在不在"是两回事(即使 CDP 没连,只要磁盘 cookie 在,`--offline` 采集依然能跑)。本步骤专门用文件系统的存在性探测。
 
@@ -207,10 +207,10 @@ lark-cli 授权通过后,用**选项框**让用户明确选择本次要用哪个
 
   | 选项 | 后续行为 |
   |------|---------|
-  | ✅ 使用现有登录态,跳过 CDP 登录（推荐） | 不打开 CDP Chrome,直接进入下一步选择采集模式;后面选默认模式完全用不上 Chrome,选全模式时到那一步再单独拉 |
+  | ✅ 使用现有登录态,跳过 CDP 登录（推荐） | 不打开 CDP Chrome,直接进入下一步选择采集模式；默认模式会在需要时自动用 Passport cookie 静默续期，选全模式时到那一步再单独拉 CDP |
   | 🔄 重新登录（换账号或强制刷新） | 走下面的"强制登录流程"(cookie 已过期时也走这条) |
 
-  cookie 是否已过期,由后面的采集步骤在真实调用时暴露(采集报错 → 让用户手动回来走强制登录);本步不做"过期与否"的预判——那需要读文件内容,违反红线 #1。
+  cookie 是否仍能续期,由后面的真实采集验证：应用 session 失效不算失败，CLI 会先自动走 Passport ticket + uniLogin；只有 Passport 也失效、被服务端撤销或文件不完整时，才让用户手动回来走强制登录。本步不读取 cookie 内容做预判，遵守红线 #1。
 
 - **本地无 cookie 文件**(首次配置,从未登录过)：**没有可选项**,必须走强制登录流程——唯一出路就是拉起 CDP 让用户扫码登录,不给"跳过"选项。
 
@@ -281,7 +281,7 @@ Cron：<根据用户执行时机生成>
 
 ## 定时采集入口 · 默认模式
 
-该入口面向无人值守运行，只抓取当前 Moka 账号默认模式下的转写数据。**不检测 CDP、不检查 Moka 登录态、不检查 lark-cli 授权**——首次配置入口已经确保这些落地了，进入本入口时默认它们仍然有效。**飞书 Base URL 直接从 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段读取,不弹选项框、不问用户——无人值守场景无法交互;要换写入目标必须回首次配置入口重新走。** 异常时（导出报未登录、写入报授权失败、config 里 `feishu_base_url` 缺失等）中断并汇报，让 HR 回到首次配置入口处理。
+该入口面向无人值守运行，只抓取当前 Moka 账号默认模式下的转写数据。**不检测 CDP、不主动读取或检查 Moka cookie 内容、不检查 lark-cli 授权**——`opencli moka` 会在真实请求中验证应用 session，并在需要时自动通过 Passport 静默续期。**飞书 Base URL 直接从 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段读取,不弹选项框、不问用户——无人值守场景无法交互;要换写入目标必须回首次配置入口重新走。** 只有自动续期也失败、写入报授权失败或 config 里 `feishu_base_url` 缺失等异常才中断并汇报，让 HR 回到首次配置入口处理。
 
 ### 1. 覆盖导出今日全量 JSON
 
@@ -291,9 +291,9 @@ Cron：<根据用户执行时机生成>
 opencli moka export-transcripts --offline --output "<绝对输出路径>" --overwrite -f json
 ```
 
-`--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。`--overwrite` 覆盖旧文件，得到今天默认模式的全量 JSON。
+`--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。若应用 session 已失效，CLI 会自动使用同一文件里的 Passport cookie 获取 ticket、调用 uniLogin、写回新 session 并重试原请求。`--overwrite` 覆盖旧文件，得到今天默认模式的全量 JSON。
 
-若导出报错为"未登录 / 登录态失效"，中断本次采集，汇报"Moka 登录态失效，需要 HR 重新执行首次配置入口的登录步骤"，不要在定时任务里尝试自动打开 Chrome。
+若命令最终仍报"Passport 登录态无法换取 ticket / 应用会话和 Passport 登录态均无法恢复 / 登录态失效"，说明 CLI 已经尝试过静默续期但 Passport 本身也过期、被服务端撤销，或 cookie 文件不完整。此时中断本次采集，汇报"Moka Passport 登录态无法自动恢复，需要 HR 重新执行首次配置入口的登录步骤或替换完整 moka-cookies.json"，不要在定时任务里尝试自动打开 Chrome，也不要由 Agent 读取或拼装 cookie。
 
 ### 2. 共用后处理
 
