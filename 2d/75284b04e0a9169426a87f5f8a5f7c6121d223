@@ -1,0 +1,40 @@
+README.md
+  s_84fa8680e37da6::t_812c4fbcaaa337 160-161,171
+tests/http-client.test.ts
+  s_84fa8680e37da6::t_7212e7e7b4d6d0 1-76,111
+  s_84fa8680e37da6::t_f3a8ac18a1b2d9 77-110
+src/constants.ts
+  s_84fa8680e37da6::t_7121a160b6ee48 2,12-14
+TESTING.md
+  s_84fa8680e37da6::t_812c4fbcaaa337 118,121
+skills/moka-transcript/SKILL.md
+  s_84fa8680e37da6::t_d0a1c8bb8937da 8,12,191,210,213,284,294,296
+src/plugin.ts
+  s_84fa8680e37da6::t_d52147c4db9ac0 46-49
+  s_84fa8680e37da6::t_c7ce26fa1992e1 106-107,111-112
+src/http-client.ts
+  s_84fa8680e37da6::t_f3a8ac18a1b2d9 186-193
+  s_84fa8680e37da6::t_7121a160b6ee48 2,35-46,69,71-76,78-79,82-83,87,107,117,138-144,146-185,194-216,218,220-226
+  s_84fa8680e37da6::t_812c4fbcaaa337 145
+moka.js
+  s_84fa8680e37da6::t_e06a900d763cc5 1007
+  s_84fa8680e37da6::t_5e27e9b38cc4e5 7,15-18,923-927,943-944,946-947,950-951,955,974,983,1001-1006,1008-1040,1043-1060,1062-1069
+  s_84fa8680e37da6::t_94c43682503c31 1041-1042
+  s_84fa8680e37da6::t_a672a94c4d613e 1101-1104,1149-1150,1154-1155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.45-trip",
+  "base_commit_sha": "2d75284b04e0a9169426a87f5f8a5f7c6121d223",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
