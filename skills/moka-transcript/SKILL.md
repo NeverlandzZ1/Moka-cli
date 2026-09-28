@@ -11,6 +11,11 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - Agent 层（对话回复、日志摘要、错误信息、临时文件名、脚本 stdout）**不得读取、复制、回显或持久化**任何 Cookie、JWT、access token、密码、验证码。
 - CLI 插件（`opencli moka`）**内部**为了支持默认模式定时任务在 Chrome 被关闭时也能采集，允许把 Moka 应用与 Passport 登录 cookie 明文落盘到 `~/.opencli/mokaData/moka-cookies.json`（仅当前 OS 用户账户可读）。应用 session 失效时，插件会用同一文件中的 Passport cookie 走 ticket + uniLogin 静默续期并写回新 cookie；全程无需 CDP。该文件由 CLI 内部读写，Agent 不得读取、cat、上传、转发或在对话/日志中回显该文件内容。
 
+**执行工具边界**：
+- 依赖本机状态的命令必须用 `lobe-local-system/runCommand` 在用户电脑执行，包括 `opencli moka`、CDP/Chrome、`lark-cli`，以及本 skill 自带且需要访问 `~/.opencli` 配置或本地授权的 `.mjs` 脚本；这样才能使用本机 PATH、CLI、Cookie 文件和用户配置。Cookie 仍只能由 `opencli moka` 内部读取，Agent 不得把 Cookie 内容作为命令参数或传给其他执行器。
+- 仅 `interviewer-review` 随 skill 分发的统计、证据提取、渲染和校验脚本使用 `lobe-skills/execScript`，由它提供对应版本的 skill 资源；这些脚本只接收明确传入的本地逐字稿、stats、analysis 和 HTML 路径，不负责调用 `opencli moka`、获取登录态或读取 Cookie。
+- `runtime: server` 只表示 Agent 推理运行位置，不能据此判断命令执行位置。当前流程必须同时具备本地系统执行器和可访问本地输入输出路径的 skill 执行器；缺少任一执行器时中断并汇报，不把抓取流程迁到云端重试。
+
 ## 路由
 
 根据请求选择且只执行一个入口：
@@ -374,7 +379,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 
 ### 后处理-1. 调用原版 `interviewer-review` 生成并校验本地 HTML
 
-这是定时任务的**唯一**报告生成路径。先定位已安装的 `interviewer-review` skill；若宿主未安装、当前 Agent 无法读取其 `SKILL.md`、或其 `scripts/transcript_stats.py` / `render_report.py` / `validate_report.py` / `assets/report-template.html` 缺失，则中断本次任务，明确报“interviewer-review 报告引擎不可用”，不得改用旧生成器、手写 HTML 或简化模板。
+这是定时任务的**唯一**报告生成路径。先定位已安装的 `interviewer-review` skill；若宿主未安装、当前 Agent 无法读取其 `SKILL.md`、或其 `scripts/transcript_stats.py` / `scripts/extract_evidence.cjs` / `render_report.py` / `validate_report.py` / `assets/report-template.html` 缺失，则中断本次任务，明确报“interviewer-review 报告引擎不可用”，不得改用旧生成器、手写 HTML 或简化模板。
 
 遍历已完成后处理-0 预筛的 `<绝对输出路径>` 的 `records[]`：
 
@@ -385,7 +390,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 #### 步骤 A：统计 + 面试官绑定
 
 1. 将逐字稿写入本地 `.txt` 临时文件（路径如 `<stats目录>/transcript_<idx>.txt`）。
-2. 用 `interviewer-review` 的 `transcript_stats.py` 跑统计，传入 Moka 结构化面试官名。Windows 用 `python` 而非 `python3`，且设 `chcp 65001` + `PYTHONIOENCODING=utf-8`。**脚本必须通过 `execScript` 调用**（`execScript` 会自动提供 skill 资源并以 skill 目录为 cwd）。不要用 `runCommand` + 本地绝对路径绕过——本地可能存在多个 skill 副本，版本不可靠。遇到 Windows PowerShell `&&` 报错时用 `cmd /c` 或 `;` 替代，不要切换工具。
+2. 用 `interviewer-review` 的 `transcript_stats.py` 跑统计，传入 Moka 结构化面试官名。Windows 用 `python` 而非 `python3`，且设 `chcp 65001` + `PYTHONIOENCODING=utf-8`。**仅这个随 `interviewer-review` skill 分发的脚本通过 `execScript` 调用**（由执行器提供对应版本的 skill 资源，并读写明确传入的本地路径）。不要用本地 `runCommand` + 某个仓库副本的绝对路径绕过——本地可能存在多个 skill 副本，版本不可靠；这条限制不适用于前面的 `opencli moka`、`lark-cli` 和 Moka 自带 `.mjs`。遇到 Windows PowerShell `&&` 报错时用 `cmd /c` 或 `;` 替代，不要切换工具。
 3. 若 `binding_warnings` 非空，从 `stats.speakers` 的 keys 里找到 `questions` 最高的说话人作为面试官标签，用该标签重新跑统计，直到 `binding_warnings` 为空。**多面试官时**：所有可识别的面试官 speaker 都要传入 `--interviewer`（可重复传参），确保 `stats.roles` 里所有面试官都被标为 `interviewer`。
 4. 统计 JSON 保存到 `<stats目录>/stats_<idx>.json`。后续所有 turn_index、speaker 标签、share_pct 均从该文件取。
 
@@ -399,7 +404,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 
 通读逐字稿后、写 analysis.json 之前，**必须先做一次证据预分配**——确保每个 claim_id 用哪些 turn_index 在写之前就规划好，而不是写完再靠校验器报错去修：
 
-1. 用 `.cjs` 脚本从 `stats_<idx>.json` 提取所有 `role=interviewer` 的轮次，按 `chars` 降序列出 `turn_index`、`who`、`display_ts`、`chars`、内容前80字。
+1. 通过 `interviewer-review` 的 `execScript` 对当前单个本地 `stats_<idx>.json` 运行 `node scripts/extract_evidence.cjs "<stats_<idx>.json>"`。使用输出的 `eligible_interviewer_turns`（已按 chars 降序）、`opening_interviewer_turns`、`closing_interviewer_turns`、`speakers`、`process_signals` 与 `redline_signals`。每次只处理一个 stats JSON；**不得**临时生成 `check-stats.cjs` 等辅助脚本，也不得改用本地 `runCommand` 调用某个仓库副本。该脚本正常应在数秒内完成；若 skill 执行器明确失败或超时，停止当前报告阶段并汇报，不要无限等待或换工具重试。
 2. 从这些轮次中选出 **每个轮次只能分配给一个 claim_id** 的证据池。规划时满足：
    - 每个亮点（H1-H5）分到 2-3 个不重复的面试官轮次，每个 `chars ≥ 40`（避免"你好""拜拜"等极短轮次）。
    - 每个改进项（I1-I5）分到 2-3 个不重复的面试官轮次（`single_event:true` 的可以只给1个）。
@@ -423,7 +428,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 - [ ] **所有 turn_index 全局不重复**——一个 turn_index 只能出现在一个 claim_id 里。亮点和改进项不能共用同一段原话。
 - [ ] **雷达 ≥3.5 的维度都有对应 highlight**——如果打了提问质量 4.0，必须有 dimension="提问质量" 的亮点条目。
 - [ ] **雷达低分的维度都有对应 improvement**——如果倾听打了 2.0，必须有 dimension="倾听" 的改进项条目。
-- [ ] **倾听占比 KPI 校验**：只有 `stats.speakers` 里**单个面试官**的 `share_pct > 30` 或候选人 `share_pct < 70` 时，才能写 `evidence_basis="quantitative_pattern"` 的倾听改进项。**多面试官场景**：校验器从 stats.json 取的是 `--interviewer` 参数传入的那个说话人的 `share_pct`，不是合计值——**不要手算合计占比写进 summary**。如不确定哪个说话人的值会被校验，用 `node -e` 打印 `stats.speakers` 查看实际 share_pct 后再写。
+- [ ] **倾听占比 KPI 校验**：只有 `stats.speakers` 里**单个面试官**的 `share_pct > 30` 或候选人 `share_pct < 70` 时，才能写 `evidence_basis="quantitative_pattern"` 的倾听改进项。**多面试官场景**：校验器从 stats.json 取的是 `--interviewer` 参数传入的那个说话人的 `share_pct`，不是合计值——**不要手算合计占比写进 summary**。使用 `extract_evidence.cjs` 输出的 `speakers` 核对实际 share_pct，不再另起 `node -e` 或临时脚本。
 - [ ] **不写"最佳听众"称号当面试官占比 >30%**。
 - [ ] **claim 和 summary 文本不含隐式触发词**——校验器用正则匹配 claim+summary 文本强制 evidence_basis 类型（见下表），写之前确认你的 claim 措辞和 evidence_basis 类型一致。
 - [ ] **process_signals 已处理**——如果 stats.json 输出了 `process_signals`（如会前长空档），必须在「开场与流程」改进项中引用空档前后的 `before_turn_index` 和 `after_turn_index`。
@@ -607,10 +612,11 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 | `python3` 命令不存在，报 `exit code 9009` | Windows 上可执行文件名是 `python` 不是 `python3` | 用 `python` 替代 `python3`；SKILL.md 命令模板写 `python3`（跨平台兼容），Windows 实跑时换成 `python` |
 | PowerShell `>` 重定向生成的 JSON 带 UTF-16 BOM，`json.loads` 报 `Unexpected UTF-8 BOM` | PowerShell 5.1 的 `>` 默认用 UTF-16 编码 | **禁止用 PowerShell `>` 重定向保存 Python stdout**；改用 Python 子进程 `capture_output=True, text=True, encoding='utf-8'` 捕获后用 `open(path,'w',encoding='utf-8')` 写文件 |
 | `Set-Content -Encoding UTF8` 生成的 JSON 带 BOM，`json.loads` 报 `JSONDecodeError` | PS 5.1 的 `-Encoding UTF8` 会加 BOM | **禁止用 `Set-Content -Encoding UTF8` 写 JSON**；改用 `writeFile` 工具或 Node.js `fs.writeFileSync(path, content, 'utf-8')`，两者都不加 BOM |
-| PowerShell `&&` 链接失败，报 `ParserError` | PowerShell 5.1 不支持 `&&` | 用 `;` 或 `if ($?) { ... }` 替代，或分成多次 execScript 调用 |
+| PowerShell `&&` 链接失败，报 `ParserError` | PowerShell 5.1 不支持 `&&` | 用 `;` 或 `if ($?) { ... }` 替代；本机 CLI/本 skill `.mjs` 仍走本地 `runCommand`，只有 `interviewer-review` 资源走 `execScript` |
 | `python -c "f'{...}'"` 单行崩 SyntaxError | PowerShell 引号转义与 Python f-string 冲突 | **禁止 `python -c` 单行运行任何含 f-string 或多语句的代码**;写到 `.py` 临时文件再跑 |
-| `node "scripts/xxx.mjs"` 找不到脚本 | 宿主 execScript 的 cwd 不在 skill 目录 | **一律用绝对路径** `node "<Skill目录>/scripts/xxx.mjs"`。共同前置第 1 步就是干这个的 |
-| 手误 `D:` 打成 `E:` | 无 | 每一次 execScript 之前肉眼核对盘符 |
+| `node "scripts/xxx.mjs"` 找不到脚本 | 混用了两类执行器或未解析 Moka skill 路径 | Moka skill 自带 `.mjs` 用本地 `runCommand` + 已解析的绝对路径；`interviewer-review` 资源只通过其 `execScript` 调用，不指向本地仓库副本 |
+| UI 长时间停在 `node ...extract_evidence.cjs` 且没有工具结果 | skill 执行器未返回，不代表本地 `opencli` 或 Cookie 异常 | 不生成替代脚本、不切到本地 `runCommand` 调用仓库副本；将本次报告阶段标记为工具执行失败并结束。重新触发任务时可复用已有 stats，但外部写入仍按正常去重规则执行 |
+| 手误 `D:` 打成 `E:` | 无 | 每次向任一执行器传本地路径前肉眼核对盘符 |
 
 ### 报告与云盘阶段
 
@@ -685,13 +691,13 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
   - redline_signals 逐条处理:strong 进 redlines,weak 进 redlines 或 dismissed_redline_signals,speaker 是候选人的写进 dismissed
   - advice 恰好 4 条
 - [ ] **--interviewer 参数传的是 stats.json speakers 的 key**(转录 speaker 标签),不是 Moka 展示名。多面试官可重复传。
-- [ ] 大 JSON 结构探查用 `.cjs` 脚步文件,不用 `grep` / `Read` / `node -e` / `python -c` 硬碰。
+- [ ] stats 证据摘要只用 `interviewer-review/scripts/extract_evidence.cjs`，每次一个本地 stats JSON，通过该 skill 的 `execScript` 调用；不临时生成 `.cjs`，不用本地 `runCommand` 指向仓库副本，也不用 `node -e` / `python -c`。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
 - [ ] backfill-interviewer-user.mjs 在 dedup 之后执行,失败/`unresolvedNames`不阻塞汇报,把摘要附到汇总即可。
 - [ ] 出现任何写入失败**不重跑整个流水线**——把 `errors` 附到汇总,让 HR 决定。
 - [ ] **批量报告生成策略**：子代理只承担"读逐字稿→分析→写 analysis.json"，渲染和校验由自己串行跑。子代理返回后必须检查 analysis.json 完整性，空结果则自行接管，不停顿。**子代理不可用时由本 Agent 串行处理,不得降低质量标准。**
-- [ ] **interviewer-review 的脚本和模板必须通过 `execScript` 调用**，不用 `runCommand` + 本地路径。Windows `&&` 报错用 `cmd /c` 或 `;` 替代，不换工具。
+- [ ] **执行器边界正确**：`opencli moka`、CDP、`lark-cli` 和 Moka 自带 `.mjs` 使用本地 `lobe-local-system/runCommand`；只有 `interviewer-review` 随 skill 分发的脚本和模板通过 `execScript` 调用。Cookie 只由本地 `opencli` 内部读取。
 
 
 
