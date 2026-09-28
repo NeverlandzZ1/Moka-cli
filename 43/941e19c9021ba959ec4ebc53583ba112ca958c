@@ -1,0 +1,20 @@
+skills/moka-transcript/SKILL.md
+  s_84fa8680e37da6::t_0d713fd8a50566 14-18,393,407,615,617-619,694,700
+  s_84fa8680e37da6::t_fe0eef7dad08fc 382,431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.45-trip",
+  "base_commit_sha": "43941e19c9021ba959ec4ebc53583ba112ca958c",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
