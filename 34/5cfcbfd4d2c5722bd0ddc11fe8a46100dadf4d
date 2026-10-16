@@ -1,0 +1,36 @@
+tests/collector.test.ts
+  s_84fa8680e37da6::t_fc6bc5dfaba688 80,98,125
+src/plugin.ts
+  s_84fa8680e37da6::t_fc6bc5dfaba688 8,278-279,284-291
+reference/moka-interview-apis.md
+  s_84fa8680e37da6::t_52289e81c76c53 10-11
+  s_84fa8680e37da6::t_fc6bc5dfaba688 30
+src/collector.ts
+  s_84fa8680e37da6::t_fc6bc5dfaba688 110-114
+src/moka-api.ts
+  s_84fa8680e37da6::t_fc6bc5dfaba688 33,43
+README.md
+  s_84fa8680e37da6::t_fc6bc5dfaba688 115-119,235-241
+moka.js
+  s_84fa8680e37da6::t_89f03ff751b0fc 552,562,790,1340-1341,1346-1353
+tests/moka-api.test.ts
+  s_84fa8680e37da6::t_fc6bc5dfaba688 4,25,29,41
+src/types.ts
+  s_84fa8680e37da6::t_fc6bc5dfaba688 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "345cfcbfd4d2c5722bd0ddc11fe8a46100dadf4d",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
