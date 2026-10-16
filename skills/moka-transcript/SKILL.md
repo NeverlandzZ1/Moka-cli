@@ -396,7 +396,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 #### 步骤 A：统计 + 面试官绑定
 
 1. 将逐字稿写入本地 `.txt` 临时文件（路径如 `<stats目录>/transcript_<idx>.txt`）。
-2. 用 `interviewer-review` 的 `transcript_stats.py` 跑统计，传入 Moka 结构化面试官名。Windows 用 `python` 而非 `python3`，且设 `chcp 65001` + `PYTHONIOENCODING=utf-8`。**仅这个随 `interviewer-review` skill 分发的脚本通过 `execScript` 调用**（由执行器提供对应版本的 skill 资源，并读写明确传入的本地路径）。不要用本地 `runCommand` + 某个仓库副本的绝对路径绕过——本地可能存在多个 skill 副本，版本不可靠；这条限制不适用于前面的 `opencli moka`、`lark-cli` 和 Moka 自带 `.mjs`。遇到 Windows PowerShell `&&` 报错时用 `cmd /c` 或 `;` 替代，不要切换工具。
+2. 用 `interviewer-review` 的 `transcript_stats.py` 跑统计，传入 Moka 结构化面试官名，并始终传入 `--round "<record.roundName>"`。Windows 用 `python` 而非 `python3`，且设 `chcp 65001` + `PYTHONIOENCODING=utf-8`。**仅这个随 `interviewer-review` skill 分发的脚本通过 `execScript` 调用**（由执行器提供对应版本的 skill 资源，并读写明确传入的本地路径）。不要用本地 `runCommand` + 某个仓库副本的绝对路径绕过——本地可能存在多个 skill 副本，版本不可靠；这条限制不适用于前面的 `opencli moka`、`lark-cli` 和 Moka 自带 `.mjs`。遇到 Windows PowerShell `&&` 报错时用 `cmd /c` 或 `;` 替代，不要切换工具。
 3. 若 `binding_warnings` 非空，从 `stats.speakers` 的 keys 里找到 `questions` 最高的说话人作为面试官标签，用该标签重新跑统计，直到 `binding_warnings` 为空。**多面试官时**：所有可识别的面试官 speaker 都要传入 `--interviewer`（可重复传参），确保 `stats.roles` 里所有面试官都被标为 `interviewer`。
 4. 统计 JSON 保存到 `<stats目录>/stats_<idx>.json`。后续所有 turn_index、speaker 标签、share_pct 均从该文件取。
 
@@ -410,11 +410,11 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 
 通读逐字稿后、写 analysis.json 之前，**必须先做一次证据预分配**——确保每个 claim_id 用哪些 turn_index 在写之前就规划好，而不是写完再靠校验器报错去修：
 
-1. 通过 `interviewer-review` 的 `execScript` 对当前单个本地 `stats_<idx>.json` 运行 `node scripts/extract_evidence.cjs "<stats_<idx>.json>"`。使用输出的 `eligible_interviewer_turns`（已按 chars 降序）、`opening_interviewer_turns`、`closing_interviewer_turns`、`speakers`、`process_signals` 与 `redline_signals`。每次只处理一个 stats JSON；**不得**临时生成 `check-stats.cjs` 等辅助脚本，也不得改用本地 `runCommand` 调用某个仓库副本。该脚本正常应在数秒内完成；若 skill 执行器明确失败或超时，停止当前报告阶段并汇报，不要无限等待或换工具重试。
+1. 通过 `interviewer-review` 的 `execScript` 对当前单个本地 `stats_<idx>.json` 运行 `node scripts/extract_evidence.cjs "<stats_<idx>.json>"`。使用输出的 `round`、`redline_policy`、`eligible_interviewer_turns`、`opening_interviewer_turns`、`closing_interviewer_turns`、`speakers`、`process_signals` 与 `redline_signals`。`redline_policy.enabled=false` 时本场为 HR面试：不分配 R 类证据，不扫描或生成红线。每次只处理一个 stats JSON；**不得**临时生成 `check-stats.cjs` 等辅助脚本，也不得改用本地 `runCommand` 调用某个仓库副本。
 2. 从这些轮次中选出 **每个轮次只能分配给一个 claim_id** 的证据池。规划时满足：
    - 每个亮点（H1-H5）分到 2-3 个不重复的面试官轮次，每个 `chars ≥ 40`（避免"你好""拜拜"等极短轮次）。
    - 每个改进项（I1-I5）分到 2-3 个不重复的面试官轮次（`single_event:true` 的可以只给1个）。
-   - 红线证据（R1-R2）分到 1-2 个轮次。
+   - 仅 `redline_policy.enabled=true` 时，红线证据（R1-R2）分到 1-2 个轮次；HR面试不分配 R 类证据。
    - **所有 claim_id 的证据 turn_index 全局不重复**——同一个 turn_index 不能出现在两个 claim_id 里。
 3. 如果面试官轮次不够分配（如面试官说话太少、太短），说明这场面试官行为证据不足，应降低亮点数量到 3 条、改进项数量到 3 条，或降低雷达分数（避免 ≥3.5 维度需要对应亮点）。**不得复用同一个 turn_index 凑数**。
 
@@ -439,7 +439,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 - [ ] **claim 和 summary 文本不含隐式触发词**——校验器用正则匹配 claim+summary 文本强制 evidence_basis 类型（见下表），写之前确认你的 claim 措辞和 evidence_basis 类型一致。
 - [ ] **process_signals 已处理**——如果 stats.json 输出了 `process_signals`（如会前长空档），必须在「开场与流程」改进项中引用空档前后的 `before_turn_index` 和 `after_turn_index`。
 - [ ] **badge_line 去掉 `<em>` 标签后 20-35 字**（标点也算字数）。
-- [ ] **redline_signals 已逐条处理**——`strength=strong` 的必须进 `redlines`（不允许 dismiss），`strength=weak` 的确认命中进 `redlines` 或确属边界反例进 `dismissed_redline_signals`（带 `turn_index`/`category`/`reason`）。**注意：redline_signals 里的 `speaker` 是候选人时不构成面试官红线**，写进 `dismissed_redline_signals` 并说明原因。
+- [ ] **红线策略已执行**——`redline_policy.enabled=true` 时逐条处理 redline_signals；`enabled=false` 时 `redlines=[]`、`dismissed_redline_signals=[]`、无 R 类证据、无「本场请注意」称号和红线区块。HR面试若低于正职 20 分钟/实习 15 分钟，必须写为「开场与流程」普通改进项，`evidence_basis="duration_boundary"`，引用面试官首尾轮次，KPI 显示黄色「偏短」。
 - [ ] **advice 恰好 4 条**。
 
 **claim 文本 → evidence_basis 隐式触发表（校验器源码 render_report.py 第 126-133 行）：**
@@ -466,7 +466,7 @@ python scripts/validate_report.py "<报告.html>" --template assets/report-templ
 **注意**：`--interviewer` 参数传的是 **stats.json 中 `speakers` 对象的 key**（即转录 speaker 标签），不是 Moka 展示名。多面试官时可重复传 `--interviewer`。
 3. 校验退出码为 0 才算通过。校验失败时**修改 analysis.json 后重新渲染+校验**，不要修改 HTML 或模板。
 4. 只有校验通过的 HTML 才能进入上传阶段。生成报告一律写入 `<transcript.json 所在目录>/reports/面试复盘报告-<面试官>-<候选人>.html`；面试官与候选人使用上述 record 真名，遇到 Windows 非法文件名字符 `\\ / : * ? " < > |` 时替换为安全字符，空值写"未记录"。
-5. 从 `analysis.json.radar` 写入 `record.reviewScores`：`openingFlow`、`questionQuality`、`listening`、`followUpDepth`、`scaleControl`、`feedbackExperience`；同时写入 `redLineHits`（由已确认 `redlines` 派生），以保持现有 Base 字段契约不变。
+5. 从 `analysis.json.radar` 写入 `record.reviewScores`：`openingFlow`、`questionQuality`、`listening`、`followUpDepth`、`scaleControl`、`feedbackExperience`；同时写入 `redLineHits`（由已确认 `redlines` 派生；HR面试固定为空数组），以保持现有 Base 字段契约不变。
 6. 单条评分、渲染或校验失败：写 `record.reviewError = "interviewer-review failed: <简短原因>"`，保留本地中间文件供排查，不阻断其他记录。**但校验失败率超过 50% 时应在汇报中明确标注"analysis.json 质量需人工排查"**——不应将系统性失败当作偶发失败处理。
 
 ### 后处理-2. 上传校验通过的 HTML 到飞书云盘并写回 URL
@@ -697,7 +697,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
   - claim 和 summary 不含隐式触发词("开场""收尾""追问深度"等,见后处理-1 步骤D 的隐式触发表)
   - process_signals 里的每条 signal 都在改进项里被引用
   - badge_line 去 <em> 后 20-35 字
-  - redline_signals 逐条处理:strong 进 redlines,weak 进 redlines 或 dismissed_redline_signals,speaker 是候选人的写进 dismissed
+  - 红线策略已执行:enabled=true 时逐条处理 strong/weak；enabled=false 时 redlines/dismissed 均为空，短时长改用 duration_boundary
   - advice 恰好 4 条
 - [ ] **--interviewer 参数传的是 stats.json speakers 的 key**(转录 speaker 标签),不是 Moka 展示名。多面试官可重复传。
 - [ ] stats 证据摘要只用 `interviewer-review/scripts/extract_evidence.cjs`，每次一个本地 stats JSON，通过该 skill 的 `execScript` 调用；不临时生成 `.cjs`，不用本地 `runCommand` 指向仓库副本，也不用 `node -e` / `python -c`。
