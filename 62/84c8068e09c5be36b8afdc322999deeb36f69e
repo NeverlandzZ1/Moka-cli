@@ -1,0 +1,39 @@
+tests/fixtures/mock-lark-cli.mjs
+  s_84fa8680e37da6::t_854e340e5f9b0e 15-23,52-57,63,66-67,69-84
+skills/moka-transcript/references/lark-base-write.md
+  s_84fa8680e37da6::t_964952877d6666 270-274,276-280,292,297,320,323
+  s_84fa8680e37da6::t_21dc22362b054d 39,81,114,207,213,228-232,235,239,244
+  s_84fa8680e37da6::t_8c173ac22a95eb 210,275
+skills/moka-transcript/SKILL.md
+  s_84fa8680e37da6::t_21dc22362b054d 501,503,538,541,548-552,555-558,565,588,606,712,728
+  s_84fa8680e37da6::t_964952877d6666 47,329
+tests/backfill-user-fields.test.ts
+  s_84fa8680e37da6::t_3dbfd55f98575e 29-32,49-59,96,102,106
+  s_84fa8680e37da6::t_854e340e5f9b0e 1-28,33-48,60-95,97-101,103-105,107-109
+skills/moka-transcript/scripts/sync-lark-base.mjs
+  s_84fa8680e37da6::t_d56fe2ea096389 212,346,356,495
+skills/moka-transcript/scripts/backfill-interviewer-user.mjs
+  s_84fa8680e37da6::t_d490b37fce71f5 565,589-593,595-599,604-611,618,624-628,630-631,633-635,638-639,641,643,673-705,722-734,736-738,740-741,744-745,748-750,753-754,756,760-761,763-764,774
+  s_84fa8680e37da6::t_f5579b9d3c6fa2 4,11-15,18,41,44,75-76,98,114,117,314-315
+  s_84fa8680e37da6::t_8c2c5c99cfd62f 412-447,517-523
+  s_84fa8680e37da6::t_8c173ac22a95eb 19-20,594,636-637
+  s_84fa8680e37da6::t_964952877d6666 619,632,642,644
+tests/sync-field-mapping.test.ts
+  s_84fa8680e37da6::t_d56fe2ea096389 11,14,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "6284c8068e09c5be36b8afdc322999deeb36f69e",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
