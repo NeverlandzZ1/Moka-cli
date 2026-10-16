@@ -3,6 +3,7 @@ import type {
   Id,
   InterviewRecord,
   MeetingSummaryRecord,
+  MokaCurrentUser,
 } from './types.js';
 import {
   asArray,
@@ -14,6 +15,24 @@ import {
 
 function readId(value: unknown): Id | undefined {
   return typeof value === 'string' || typeof value === 'number' ? value : undefined;
+}
+
+export function parseCurrentUsers(response: unknown): MokaCurrentUser[] {
+  if (!isRecord(response) || !isRecord(response.data)) return [];
+  const users: MokaCurrentUser[] = [];
+  for (const value of asArray(response.data.users)) {
+    if (!isRecord(value)) continue;
+    const userId = readId(value.userId);
+    const name = asString(value.name);
+    if (userId === undefined || !name) continue;
+    const email = asString(value.email);
+    users.push({
+      userId,
+      name,
+      ...(email ? { email } : {}),
+    });
+  }
+  return users;
 }
 
 function applicationFromEntity(value: unknown): ApplicationRecord | undefined {

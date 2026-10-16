@@ -1,6 +1,6 @@
 # Moka 面试逐字稿接口说明
 
-本文记录完成面试逐字稿采集所需的三个读取接口、一个招聘模式切换接口，以及它们之间的调用关系。
+本文记录当前登录 HR 识别、面试逐字稿采集所需的四个读取接口、一个招聘模式切换接口，以及它们之间的调用关系。
 
 ## 共同前提
 
@@ -13,7 +13,25 @@
 
 ---
 
-## 0. 切换招聘模式：`update_currenthiremode_fields`
+## 0. 获取当前登录 HR：`getCurrent`
+
+```http
+POST https://app.mokahr.com/api/outer/ats-warden/businessUnit/users/getCurrent
+```
+
+该接口请求体为空。插件将 `data.users[]` 规范化为以下字段：
+
+| 目标字段 | 响应路径 |
+| --- | --- |
+| `userId` | `data.users[].userId` |
+| `name` | `data.users[].name` |
+| `email` | `data.users[].email` |
+
+`name` 是当前 Moka 登录账号的 HR 展示姓名。可以通过 `opencli moka current-user -f json` 在线查询，或通过 `opencli moka current-user --offline -f json` 使用本地持久化登录态查询。两种模式调用同一个接口，不从页面文字、面试官列表或逐字稿推断 HR 身份。
+
+---
+
+## 1. 切换招聘模式：`update_currenthiremode_fields`
 
 ```http
 PUT https://app.mokahr.com/api/users/update_currenthiremode_fields
@@ -33,7 +51,7 @@ Content-Type: application/json
 
 ---
 
-## 1. 获取候选人及应聘岗位：`interviewList`
+## 2. 获取候选人及应聘岗位：`interviewList`
 
 ### 请求
 
@@ -107,7 +125,7 @@ data
 
 ---
 
-## 2. 获取候选人的全部面试：`interviewCard`
+## 3. 获取候选人的全部面试：`interviewCard`
 
 ### 请求
 
@@ -173,7 +191,7 @@ data[]
 
 ---
 
-## 3. 获取会议逐字稿：`getMeetingSummary`
+## 4. 获取会议逐字稿：`getMeetingSummary`
 
 ### 请求
 

@@ -1,5 +1,46 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultInterviewListBody, setHireMode, shanghaiDayBounds } from '../src/moka-api.js';
+import {
+  defaultInterviewListBody,
+  getCurrentUsers,
+  setHireMode,
+  shanghaiDayBounds,
+} from '../src/moka-api.js';
+import type { HttpClient } from '../src/http-client.js';
+
+describe('current Moka user', () => {
+  it('requests and returns the current logged-in HR user', async () => {
+    const fetchJson = vi.fn().mockResolvedValue({
+      code: 0,
+      msg: '成功',
+      data: {
+        users: [{
+          userId: 8621994,
+          name: 'HR User',
+          email: 'hr@example.com',
+        }],
+      },
+    });
+    const client: HttpClient = { fetchJson };
+
+    await expect(getCurrentUsers(client)).resolves.toEqual([{
+      userId: 8621994,
+      name: 'HR User',
+      email: 'hr@example.com',
+    }]);
+    expect(fetchJson).toHaveBeenCalledWith(
+      '/api/outer/ats-warden/businessUnit/users/getCurrent',
+      { method: 'POST', timeoutMs: 30_000 },
+    );
+  });
+
+  it('rejects an otherwise successful response without a current user', async () => {
+    const client: HttpClient = {
+      fetchJson: vi.fn().mockResolvedValue({ code: 0, data: { users: [] } }),
+    };
+
+    await expect(getCurrentUsers(client)).rejects.toThrow('没有返回当前登录用户');
+  });
+});
 
 describe('default interview discovery ranges', () => {
   it('builds the full today range using Asia/Shanghai day boundaries', () => {

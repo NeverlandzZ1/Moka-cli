@@ -1,7 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { parseApplications, parseInterviews, parseMeetingSummary, readPagination } from '../src/parsers.js';
+import {
+  parseApplications,
+  parseCurrentUsers,
+  parseInterviews,
+  parseMeetingSummary,
+  readPagination,
+} from '../src/parsers.js';
 
 describe('Moka response parsers', () => {
+  it('extracts the current logged-in HR user', () => {
+    expect(parseCurrentUsers({
+      code: 0,
+      data: {
+        users: [{
+          userId: 8621994,
+          name: 'HR User',
+          email: 'hr@example.com',
+          highestRoleLevel: 30,
+        }],
+      },
+    })).toEqual([{
+      userId: 8621994,
+      name: 'HR User',
+      email: 'hr@example.com',
+    }]);
+  });
+
   it('extracts and deduplicates applications', () => {
     const response = {
       data: {

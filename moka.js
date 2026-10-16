@@ -7,6 +7,7 @@ var MOKA_ORIGIN = "https://app.mokahr.com";
 var MOKA_PASSPORT_ORIGIN = "https://passport.mokahr.com";
 var MOKA_OVERVIEW_URL = `${MOKA_ORIGIN}/interviews/overview`;
 var API_PATHS = {
+  currentUser: "/api/outer/ats-warden/businessUnit/users/getCurrent",
   updateCurrentHireMode: "/api/users/update_currenthiremode_fields",
   interviewList: "/api/outer/ats-interview/interview/hr/interviewList",
   interviewCard: "/api/outer/ats-interview/interview/interviewCard",
@@ -398,6 +399,23 @@ import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/err
 function readId(value) {
   return typeof value === "string" || typeof value === "number" ? value : void 0;
 }
+function parseCurrentUsers(response) {
+  if (!isRecord(response) || !isRecord(response.data)) return [];
+  const users = [];
+  for (const value of asArray(response.data.users)) {
+    if (!isRecord(value)) continue;
+    const userId = readId(value.userId);
+    const name = asString(value.name);
+    if (userId === void 0 || !name) continue;
+    const email = asString(value.email);
+    users.push({
+      userId,
+      name,
+      ...email ? { email } : {}
+    });
+  }
+  return users;
+}
 function applicationFromEntity(value) {
   if (!isRecord(value)) return void 0;
   const applicationId = readId(value.id);
@@ -531,6 +549,18 @@ var HIRE_MODE_VALUES = {
   social: 1
 };
 var MODE_REFRESH_DELAY_MS = 2e3;
+async function getCurrentUsers(client) {
+  const response = await client.fetchJson(API_PATHS.currentUser, {
+    method: "POST",
+    timeoutMs: 3e4
+  });
+  assertApiResponse(response, "getCurrent");
+  const users = parseCurrentUsers(response);
+  if (users.length === 0) {
+    throw new CommandExecutionError("Moka getCurrent \u6210\u529F\uFF0C\u4F46\u6CA1\u6709\u8FD4\u56DE\u5F53\u524D\u767B\u5F55\u7528\u6237");
+  }
+  return users;
+}
 async function setHireMode(page, bridge, mode) {
   const currentHireMode = HIRE_MODE_VALUES[mode];
   const response = await page.evaluate(async ({ path, value }) => {
@@ -1214,6 +1244,22 @@ cli({
       await dumpCookiesFromBridge(bridge).catch(() => void 0);
       return [result];
     }
+  )
+});
+cli({
+  site: "moka",
+  name: "current-user",
+  description: "\u83B7\u53D6\u5F53\u524D\u767B\u5F55\u7684 Moka HR \u7528\u6237",
+  access: "read",
+  example: "opencli moka current-user -f json",
+  strategy: Strategy.LOCAL,
+  browser: false,
+  defaultFormat: "json",
+  args: [commonPortArg, noCdpArg],
+  columns: ["userId", "name", "email"],
+  func: async (kwargs) => withHttpClient(
+    kwargs,
+    async (client) => getCurrentUsers(client)
   )
 });
 cli({

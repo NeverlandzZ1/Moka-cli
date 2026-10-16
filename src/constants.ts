@@ -3,6 +3,7 @@ export const MOKA_PASSPORT_ORIGIN = 'https://passport.mokahr.com';
 export const MOKA_OVERVIEW_URL = `${MOKA_ORIGIN}/interviews/overview`;
 
 export const API_PATHS = {
+  currentUser: '/api/outer/ats-warden/businessUnit/users/getCurrent',
   updateCurrentHireMode: '/api/users/update_currenthiremode_fields',
   interviewList: '/api/outer/ats-interview/interview/hr/interviewList',
   interviewCard: '/api/outer/ats-interview/interview/interviewCard',

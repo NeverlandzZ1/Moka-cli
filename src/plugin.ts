@@ -4,7 +4,13 @@ import { API_PATHS, DEFAULT_CDP_PORT, MOKA_OVERVIEW_URL } from './constants.js';
 import { ensureChromeWithCdp } from './chrome.js';
 import { probeMokaLogin, withMokaPage } from './cdp.js';
 import { collectTranscripts, writeCollection } from './collector.js';
-import { getMeetingSummary, listApplications, listInterviews, setHireMode } from './moka-api.js';
+import {
+  getCurrentUsers,
+  getMeetingSummary,
+  listApplications,
+  listInterviews,
+  setHireMode,
+} from './moka-api.js';
 import { parseJsonObject } from './utils.js';
 import { dumpCookiesFromBridge } from './cookie-store.js';
 import { createHttpClient, type HttpClient } from './http-client.js';
@@ -173,6 +179,23 @@ cli({
       await dumpCookiesFromBridge(bridge).catch(() => undefined);
       return [result];
     },
+  ),
+});
+
+cli({
+  site: 'moka',
+  name: 'current-user',
+  description: '获取当前登录的 Moka HR 用户',
+  access: 'read',
+  example: 'opencli moka current-user -f json',
+  strategy: Strategy.LOCAL,
+  browser: false,
+  defaultFormat: 'json',
+  args: [commonPortArg, noCdpArg],
+  columns: ['userId', 'name', 'email'],
+  func: async (kwargs) => withHttpClient(
+    kwargs,
+    async (client) => getCurrentUsers(client),
   ),
 });
 

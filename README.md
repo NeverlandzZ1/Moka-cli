@@ -79,6 +79,20 @@ opencli moka status -f json
 }
 ```
 
+查看当前登录的 Moka HR 用户：
+
+```powershell
+opencli moka current-user -f json
+```
+
+Chrome 已关闭时也可以使用本地持久化登录态查询：
+
+```powershell
+opencli moka current-user --offline -f json
+```
+
+返回字段包括 `userId`、`name` 和 `email`。其中 `name` 是 Moka 当前登录账号的 HR 展示姓名。
+
 ### 切换校招或社招
 
 导出前可以切换 Moka 当前的招聘模式：

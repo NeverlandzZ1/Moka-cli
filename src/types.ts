@@ -3,6 +3,12 @@ export type JsonRecord = Record<string, unknown>;
 
 export type HireMode = 'campus' | 'social';
 
+export interface MokaCurrentUser {
+  userId: Id;
+  name: string;
+  email?: string;
+}
+
 export interface HireModeResult {
   mode: HireMode;
   modeLabel: '校招' | '社招';
