@@ -79,20 +79,6 @@ opencli moka status -f json
 }
 ```
 
-查看当前登录的 Moka HR 用户：
-
-```powershell
-opencli moka current-user -f json
-```
-
-Chrome 已关闭时也可以使用本地持久化登录态查询：
-
-```powershell
-opencli moka current-user --offline -f json
-```
-
-返回字段包括 `userId`、`name` 和 `email`。其中 `name` 是 Moka 当前登录账号的 HR 展示姓名。
-
 ### 切换校招或社招
 
 导出前可以切换 Moka 当前的招聘模式：
@@ -126,10 +112,11 @@ opencli moka export-transcripts \
 
 工具会：
 
-1. 找到北京时间今天的全部面试候选人。
-2. 获取这些候选人在当前应聘记录下的全部面试。
-3. 获取每场面试的面试官和逐字稿。
-4. 将结果写入指定 JSON 文件。
+1. 读取当前 Moka 登录账号的 HR 展示姓名。
+2. 找到北京时间今天的全部面试候选人。
+3. 获取这些候选人在当前应聘记录下的全部面试。
+4. 获取每场面试的面试官和逐字稿。
+5. 将结果写入指定 JSON 文件，并在 JSON 顶层写入 `面试安排HR`。
 
 今天没有面试时，`records` 可以为空。
 
@@ -244,6 +231,14 @@ transcript
 evaluationSummary
 questionAnalysis
 ```
+
+导出 JSON 顶层还包含：
+
+```text
+面试安排HR
+```
+
+该字段来自当前 Moka 登录账号的 HR 展示姓名。在线导出和 `--offline` 导出都会写入；增量合并时以本次登录账号为准。
 
 ## 数据安全
 

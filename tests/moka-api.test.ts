@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   defaultInterviewListBody,
-  getCurrentUsers,
+  getCurrentUser,
   setHireMode,
   shanghaiDayBounds,
 } from '../src/moka-api.js';
@@ -22,11 +22,11 @@ describe('current Moka user', () => {
     });
     const client: HttpClient = { fetchJson };
 
-    await expect(getCurrentUsers(client)).resolves.toEqual([{
+    await expect(getCurrentUser(client)).resolves.toEqual({
       userId: 8621994,
       name: 'HR User',
       email: 'hr@example.com',
-    }]);
+    });
     expect(fetchJson).toHaveBeenCalledWith(
       '/api/outer/ats-warden/businessUnit/users/getCurrent',
       { method: 'POST', timeoutMs: 30_000 },
@@ -38,7 +38,7 @@ describe('current Moka user', () => {
       fetchJson: vi.fn().mockResolvedValue({ code: 0, data: { users: [] } }),
     };
 
-    await expect(getCurrentUsers(client)).rejects.toThrow('没有返回当前登录用户');
+    await expect(getCurrentUser(client)).rejects.toThrow('没有返回当前登录用户');
   });
 });
 

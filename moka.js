@@ -549,7 +549,7 @@ var HIRE_MODE_VALUES = {
   social: 1
 };
 var MODE_REFRESH_DELAY_MS = 2e3;
-async function getCurrentUsers(client) {
+async function getCurrentUser(client) {
   const response = await client.fetchJson(API_PATHS.currentUser, {
     method: "POST",
     timeoutMs: 3e4
@@ -559,7 +559,7 @@ async function getCurrentUsers(client) {
   if (users.length === 0) {
     throw new CommandExecutionError("Moka getCurrent \u6210\u529F\uFF0C\u4F46\u6CA1\u6709\u8FD4\u56DE\u5F53\u524D\u767B\u5F55\u7528\u6237");
   }
-  return users;
+  return users[0];
 }
 async function setHireMode(page, bridge, mode) {
   const currentHireMode = HIRE_MODE_VALUES[mode];
@@ -787,6 +787,7 @@ function mergeCollections(existing, latest) {
   }
   return {
     generatedAt: latest.generatedAt,
+    ...latest["\u9762\u8BD5\u5B89\u6392HR"] ? { "\u9762\u8BD5\u5B89\u6392HR": latest["\u9762\u8BD5\u5B89\u6392HR"] } : existing?.["\u9762\u8BD5\u5B89\u6392HR"] ? { "\u9762\u8BD5\u5B89\u6392HR": existing["\u9762\u8BD5\u5B89\u6392HR"] } : {},
     source: latest.source,
     records: mergedRecords,
     errors: latest.errors,
@@ -1248,22 +1249,6 @@ cli({
 });
 cli({
   site: "moka",
-  name: "current-user",
-  description: "\u83B7\u53D6\u5F53\u524D\u767B\u5F55\u7684 Moka HR \u7528\u6237",
-  access: "read",
-  example: "opencli moka current-user -f json",
-  strategy: Strategy.LOCAL,
-  browser: false,
-  defaultFormat: "json",
-  args: [commonPortArg, noCdpArg],
-  columns: ["userId", "name", "email"],
-  func: async (kwargs) => withHttpClient(
-    kwargs,
-    async (client) => getCurrentUsers(client)
-  )
-});
-cli({
-  site: "moka",
   name: "applications",
   description: "\u5217\u51FA\u5019\u9009\u4EBA\u7684\u5E94\u8058\u8BB0\u5F55\u548C\u5C97\u4F4D",
   access: "read",
@@ -1352,11 +1337,20 @@ cli({
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],
   func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => {
-    const result = await collectTranscripts(client, {
+    const currentUser = await getCurrentUser(client);
+    const collected = await collectTranscripts(client, {
       ...collectionOptions(kwargs),
       ...ctx.page ? { page: ctx.page } : {},
       ...ctx.bridge ? { bridge: ctx.bridge } : {}
     });
+    const result = {
+      generatedAt: collected.generatedAt,
+      "\u9762\u8BD5\u5B89\u6392HR": currentUser.name,
+      source: collected.source,
+      records: collected.records,
+      errors: collected.errors,
+      stats: collected.stats
+    };
     const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) }) : void 0;
     return written ? { ...written.result, outputPath: written.outputPath } : result;
   })

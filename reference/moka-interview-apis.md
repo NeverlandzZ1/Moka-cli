@@ -7,8 +7,8 @@
 - 用户已经在浏览器中登录 `https://app.mokahr.com`。
 - 调用账号拥有相应候选人和面试数据的查看权限。
 - 建议通过 Chrome CDP 在已登录的 Moka 页面上下文中发起同源请求，让浏览器自动携带登录态。
-- 不读取、导出或持久化 Cookie、JWT、`moka-token`、`csrfCk`、`connect.sid` 等会话凭据。
-- 三个读取接口均为 `POST`；模式切换接口为 `PUT`。请求头至少使用 `Content-Type: application/json`。
+- Cookie、JWT、`moka-token`、`csrfCk`、`connect.sid` 等会话凭据只允许由 CLI 内部维护，不写入导出 JSON，也不得在命令输出或日志中展示。
+- 四个读取接口均为 `POST`；模式切换接口为 `PUT`。带 JSON 请求体的接口使用 `Content-Type: application/json`；`getCurrent` 发送空请求体。
 - HTTP `200` 仅表示请求到达服务端，还要检查响应中的 `code`、`success` 和 `msg`。
 
 ---
@@ -27,7 +27,7 @@ POST https://app.mokahr.com/api/outer/ats-warden/businessUnit/users/getCurrent
 | `name` | `data.users[].name` |
 | `email` | `data.users[].email` |
 
-`name` 是当前 Moka 登录账号的 HR 展示姓名。可以通过 `opencli moka current-user -f json` 在线查询，或通过 `opencli moka current-user --offline -f json` 使用本地持久化登录态查询。两种模式调用同一个接口，不从页面文字、面试官列表或逐字稿推断 HR 身份。
+`name` 是当前 Moka 登录账号的 HR 展示姓名。`export-transcripts` 在正式采集前调用该接口，并把 `name` 写入导出 JSON 顶层的 `面试安排HR` 字段。在线模式和 `--offline` 模式调用同一个接口，不从页面文字、面试官列表或逐字稿推断 HR 身份。
 
 ---
 

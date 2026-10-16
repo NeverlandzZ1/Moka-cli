@@ -107,6 +107,11 @@ export function mergeCollections(
   }
   return {
     generatedAt: latest.generatedAt,
+    ...(latest["面试安排HR"]
+      ? { "面试安排HR": latest["面试安排HR"] }
+      : existing?.["面试安排HR"]
+        ? { "面试安排HR": existing["面试安排HR"] }
+        : {}),
     source: latest.source,
     records: mergedRecords,
     errors: latest.errors,

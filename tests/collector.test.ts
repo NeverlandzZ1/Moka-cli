@@ -77,6 +77,7 @@ describe('mergeCollections', () => {
   it('updates matching application/interview pairs and appends new interviews', () => {
     const existing = {
       generatedAt: 'old',
+      "面试安排HR": '旧账号 HR',
       source: 'old-source',
       records: [
         {
@@ -94,6 +95,7 @@ describe('mergeCollections', () => {
     } satisfies CollectionResult;
     const latest = {
       generatedAt: 'new',
+      "面试安排HR": '本次登录 HR',
       source: 'new-source',
       records: [
         {
@@ -120,6 +122,7 @@ describe('mergeCollections', () => {
 
     const merged = mergeCollections(existing, latest);
     expect(merged.generatedAt).toBe('new');
+    expect(merged["面试安排HR"]).toBe('本次登录 HR');
     expect(merged.source).toBe('new-source');
     expect(merged.records).toHaveLength(2);
     expect(merged.records[0]).toMatchObject({

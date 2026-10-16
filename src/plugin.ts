@@ -5,7 +5,7 @@ import { ensureChromeWithCdp } from './chrome.js';
 import { probeMokaLogin, withMokaPage } from './cdp.js';
 import { collectTranscripts, writeCollection } from './collector.js';
 import {
-  getCurrentUsers,
+  getCurrentUser,
   getMeetingSummary,
   listApplications,
   listInterviews,
@@ -184,23 +184,6 @@ cli({
 
 cli({
   site: 'moka',
-  name: 'current-user',
-  description: '获取当前登录的 Moka HR 用户',
-  access: 'read',
-  example: 'opencli moka current-user -f json',
-  strategy: Strategy.LOCAL,
-  browser: false,
-  defaultFormat: 'json',
-  args: [commonPortArg, noCdpArg],
-  columns: ['userId', 'name', 'email'],
-  func: async (kwargs) => withHttpClient(
-    kwargs,
-    async (client) => getCurrentUsers(client),
-  ),
-});
-
-cli({
-  site: 'moka',
   name: 'applications',
   description: '列出候选人的应聘记录和岗位',
   access: 'read',
@@ -292,11 +275,20 @@ cli({
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
   func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => {
-    const result = await collectTranscripts(client, {
+    const currentUser = await getCurrentUser(client);
+    const collected = await collectTranscripts(client, {
       ...collectionOptions(kwargs),
       ...(ctx.page ? { page: ctx.page } : {}),
       ...(ctx.bridge ? { bridge: ctx.bridge } : {}),
     });
+    const result = {
+      generatedAt: collected.generatedAt,
+      "面试安排HR": currentUser.name,
+      source: collected.source,
+      records: collected.records,
+      errors: collected.errors,
+      stats: collected.stats,
+    };
     const written = typeof kwargs.output === 'string' && kwargs.output.trim()
       ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) })
       : undefined;

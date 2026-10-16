@@ -30,7 +30,7 @@ const HIRE_MODE_VALUES: Record<HireMode, 1 | 2> = {
 
 const MODE_REFRESH_DELAY_MS = 2_000;
 
-export async function getCurrentUsers(client: HttpClient): Promise<MokaCurrentUser[]> {
+export async function getCurrentUser(client: HttpClient): Promise<MokaCurrentUser> {
   const response = await client.fetchJson(API_PATHS.currentUser, {
     method: 'POST',
     timeoutMs: 30_000,
@@ -40,7 +40,7 @@ export async function getCurrentUsers(client: HttpClient): Promise<MokaCurrentUs
   if (users.length === 0) {
     throw new CommandExecutionError('Moka getCurrent 成功，但没有返回当前登录用户');
   }
-  return users;
+  return users[0]!;
 }
 
 export async function setHireMode(

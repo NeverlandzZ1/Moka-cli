@@ -54,6 +54,7 @@ export interface CollectionError {
 
 export interface CollectionResult {
   generatedAt: string;
+  "面试安排HR"?: string;
   source: string;
   records: TranscriptRecord[];
   errors: CollectionError[];
