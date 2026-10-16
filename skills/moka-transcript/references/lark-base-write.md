@@ -36,7 +36,7 @@
 | `filter-notified-records.mjs` | 定时报告前只读 Base，过滤已通知的联合键 | `node filter-notified-records.mjs --input <json>` |
 | `sync-lark-base.mjs` | 输入去重 → 批量写入面试转写 | `node sync-lark-base.mjs --input <json>` |
 | `deduplicate-lark-base.mjs` | 飞书端去重清理：拉全表 → 找重复 → 逐条删除 | `node deduplicate-lark-base.mjs` |
-| `backfill-interviewer-user.mjs` | dedup 之后运行,把「面试官」text 列的姓名解析为 open_id,回填「面试官(人员)」user 列 | `node backfill-interviewer-user.mjs` |
+| `backfill-interviewer-user.mjs` | dedup 之后运行；回填「面试官(人员)」和本次记录的「面试安排HR(人员)」 | `node backfill-interviewer-user.mjs --input <json>` |
 
 ## filter-notified-records.mjs
 
@@ -78,11 +78,10 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 
 ### 输入
 
-输入必须是 JSON 对象，包含非空的顶层 `面试安排HR` 和 `records` 数组。`面试安排HR` 来自 `export-transcripts` 对当前 Moka 登录账号的查询，不属于单条 record；sync 会把该值复制到本次每条飞书记录。字段映射：
+输入必须是 JSON 对象，包含非空的顶层 `面试安排HR` 和 `records` 数组。`面试安排HR` 来自 `export-transcripts` 对当前 Moka 登录账号的查询，不属于单条 record；sync 只校验并保留该值，不把它写成文本列，后续人员回填脚本使用它。字段映射：
 
 | 飞书字段 | 输入字段 | 写入格式 |
 |---|---|---|
-| 面试安排HR | 顶层 `面试安排HR` | text；复制到每条 record，缺失或为空时脚本拒绝写入 |
 | 候选人姓名 | `candidateName` | text |
 | 岗位名称 | `jobTitle` | text |
 | 面试官 | `interviewerNames` | 数组以 `, ` 拼接 |
@@ -112,8 +111,7 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 > 六维复盘字段、红线判定与 HTML 校验以独立的 `interviewer-review` skill 为唯一真源。命中红线的维度记 **0 分**;评分/上传失败的 record 上述字段自动传 null,飞书 Base 数字列与文本列允许空,不影响其他列写入。
 > **「是否标红」「是否已通知」是飞书单选列**(不是复选/多选)。写入值必须与 Base 上选项名**逐字节相等**——多一个空格或写成半角字母都会被飞书拒收或落成新选项。当前脚本硬编码「是」/「否」两个字面量,若有人在 Base 上把选项名改了,先在 Base 侧改回来,不改脚本。
 > **「面试复盘报告」列在飞书 Base 里必须是「文本」或「超链接」类型**(不能是「附件」)。当前 `asOptionalUrl()` 把合法 URL 直接返回**裸字符串**,`+record-batch-create` payload 里作为文本值写入,飞书文本列/超链接列都接受该格式。若真实写入报"URL 列类型不匹配",先在飞书 Base 界面把该列类型改为「文本」而不是回来改脚本。
-> 「处理状态」列不在本流水线的写入范围内。「面试官(人员)」列由 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填,失败或姓名解析不上时该列留空,不影响 sync 本步已写入的其他列。
-> 目标 Base 必须预先存在显示名严格为「面试安排HR」的文本列；该字段缺失或类型不兼容会让整批写入失败，不能静默降级为空。
+> 「处理状态」列不在本流水线的写入范围内。「面试官(人员)」与「面试安排HR(人员)」由 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填；后者直接使用 JSON 顶层姓名，不存在也不依赖「面试安排HR」文本列。
 
 ### 输出
 
@@ -206,12 +204,13 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 ### 调用
 
 ```text
-node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
+node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<transcript.json绝对路径>"
 ```
 
-可选参数:
+参数:
 
 - `--lark-cli <路径>`:指定 lark-cli 可执行文件路径(同 sync 脚本)
+- `--input <路径>`:必填；提供顶层 `面试安排HR` 及本次 `records[]` 联合键
 - `--config <路径>`:指定配置文件路径(默认 `~/.opencli/moka-config.json`)
 - `--feishu-base-url <url>`:不读 config,直接指定目标 Base URL
 - `--base-token <token>` / `--transcript-table-id <id>`:分别覆盖解析结果
@@ -226,18 +225,23 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 1. 先 dedup 保留最新一条,再 backfill 只填留下的这条,避免为马上要删除的旧记录浪费 API 调用。
 2. sync 每天会追加当天带评分的新记录,若 backfill 在 dedup 之前跑,可能填的是即将被删除的旧记录。
 
+### 两类人员字段的边界
+
+- 面试官：来源是每行「面试官」文本，回填「面试官(人员)」。
+- 面试安排 HR：来源是输入 JSON 顶层 `面试安排HR`，没有文本列；仅回填本次 `records[]` 的「面试安排HR(人员)」。
+
 ### 4 步算法
 
-1. **field-list**:拿「面试官」text 列 / 「面试官(人员)」user 列 / 「面试ID」三列的 field_id。人员列显示名支持容错匹配:
+1. **field-list**:拿「面试官」text /「面试官(人员)」user /「面试安排HR(人员)」user /「申请ID」/「面试ID」五列的 field_id。人员列显示名支持容错匹配:
    - 精确匹配 `INTERVIEWER_USER_FIELD_NAME` 常量(当前是「面试官 (人员 )」,带括号内外空格)。
    - 归一化匹配:剥掉所有 ASCII/全角空格 + 把全角括号 `（）` 转成半角 `()`,归一化后匹配到 `面试官(人员)` 就认。
    - 归一化后同时匹配到多列:直接报错,让人先在飞书 Base 上把重复列改掉,不猜。
-2. **record-list --field-id ...**:按行投影只拉三个字段(不带逐字稿正文),分页拉全量。得到每行的 `(record_id, 面试官 text, 面试官(人员) users, 面试ID)` 元组。挑出「面试官 text 有值 & 面试官(人员) user 为空」的行入 `needing[]`。
+2. **record-list --field-id ...**:按行投影只拉五个字段(不带逐字稿正文),分页拉全量。面试官挑文本有值且人员为空的行；HR 只挑联合键属于本次输入且 HR 人员为空的行。
 3. **建 `name → open_id` 映射**(两个来源,合并):
    - **来源 A(同表已填充记录)**:遍历所有行,若「面试官」= "张三、李四" 且「面试官(人员)」= `[{id:ou_A},{id:ou_B}]`,且两侧数量一致,按顺序拆解出 `张三→ou_A`、`李四→ou_B`。**数量不一致的行跳过**,记入 `existingSkipped` 但不算 fatal;这防止用户手动改过某一侧导致对不齐。
    - **来源 B(contact +search-user)**:`needing[]` 里所有姓名去重后,凡是来源 A 里没有的,用 `lark-cli contact +search-user --query <name>` 兜底,取第一条 `open_id`。串行,不并发——contact API 一般不慢,并发太高容易限流。
    - **Windows 兼容修复**(2026-09-14):`search-user` 的查询词现在从姓名中提取括号内的中文名(如 `Iris Cheng （程冬芳）` → `程冬芳`),避免完整姓名中的空格被 lark-cli 拆成位置参数报错。无括号时提取连续中文字符。
-4. **逐条 upsert**:`+record-upsert --record-id X --json @./payload-file.json`。默认 3 并发。**不用** `+record-batch-update` — 那是同值批量更新,每条 record 的人员不同,必须逐条。
+4. **逐条 upsert**:`+record-upsert --record-id X --json @./payload-file.json`。同一行缺两类人员时合并一次写入；人员值都是 `[{"id":"ou_xxx"}]`。默认 3 并发。
    - **Windows 兼容修复**(2026-09-14):所有 JSON payload(含中文字段名 `面试官 (人员 )`)现在强制写入临时文件用 `@./file.json` 引用,不走命令行内联。Windows `spawn` + `shell:true` 会经过 cmd.exe 编码链路,把 UTF-8 中文字段名转成 GBK 导致 `invalid character` 解析错误。`@file` 模式让 lark-cli 从 UTF-8 文件读取,绕过编码问题。
 
 ### 姓名拆分
@@ -263,6 +267,17 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
   "namesResolvedFromExisting": 8,
   "namesResolvedFromSearch": 3,
   "unresolvedNames": [{ "name": "李某某", "reason": "no result" }],
+  "schedulingHr": {
+    "name": "Joan Qian （钱明燕）",
+    "inputRecords": 12,
+    "matchedRecords": 12,
+    "needsBackfill": 12,
+    "alreadyFilled": 0,
+    "backfilled": 12,
+    "skipped": 0,
+    "failed": 0,
+    "unresolved": null
+  },
   "errors": []
 }
 ```
@@ -274,10 +289,12 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 1. 退出码 `0`
 2. stdout JSON 中 `ok === true`
 3. `failed === 0`
+4. `schedulingHr.failed === 0`
 
 **允许非空,不算 fatal**:
 
 - `unresolvedNames`:`contact +search-user` 找不到的姓名(过滤条件、离职、飞书 contact 索引未收录等常见原因)。
+- `schedulingHr.unresolved`:顶层 HR 姓名无法解析时不猜 open_id；对应 HR 人员列留空并汇报。
 - `skipped`:某 record 的所有姓名都解析不上,该 record 「面试官(人员)」保持为空。
 - `errors[].phase === "partial-fill"`:某 record 只解析到一部分姓名,人员列部分回填,已尽力。
 - `errors[].phase === "build-name-map"`:某些同表已填充记录 名字数量 ≠ 人员数量,被跳过;不影响 needing[] 处理。
@@ -300,10 +317,10 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 
 - sync 脚本不查面试转写表是否已有记录（直接写入，去重交给 dedup 脚本）
 - sync 脚本不删除任何 Base 记录
-- sync 脚本不写「面试官(人员)」列(由 backfill 脚本 dedup 后回填)
+- sync 脚本不写任何人员列，也不写「面试安排HR」文本列(由 backfill 脚本 dedup 后直接回填两类人员列)
 - dedup 脚本不创建新记录
 - dedup 脚本不使用 batch delete 接口（逐条删除更可靠）
-- backfill 脚本不改写「面试官」text 列,也不动人员列已有值的记录
+- backfill 脚本不改写「面试官」text 列，不创建 HR text 列，也不动人员列已有值的记录
 - backfill 脚本不新建 record;只对现有 record 做 `+record-upsert`
 - 不写入或维护面试官信息表（已废弃）
 - Agent 不手工重放脚本内部失败的写入操作；重新运行整个脚本即可

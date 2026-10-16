@@ -209,7 +209,7 @@ function stringifyQuestionAnalysis(value) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-export function transcriptFields(record, schedulingHr) {
+export function transcriptFields(record) {
   const reviewScores = record.reviewScores || {};
   const redLineHits = Array.isArray(reviewScores.redLineHits) ? reviewScores.redLineHits : [];
   // 「是否标红」= 该场评分是否命中任一合规红线(evaluation-guide + red-lines.md 判定)。
@@ -219,7 +219,6 @@ export function transcriptFields(record, schedulingHr) {
   const reviewRan = record.reviewScores !== undefined || record.reviewError !== undefined;
   const redlineFlag = reviewRan ? (redLineHits.length > 0 ? "是" : "否") : null;
   return {
-    "面试安排HR": asText(schedulingHr).trim(),
     "候选人姓名": asText(record.candidateName),
     "岗位名称": asText(record.jobTitle),
     "面试官": record.interviewerNames.join(", "),
@@ -344,7 +343,7 @@ function runLarkCli(command, args, timeoutMs, jsonPayload) {
 }
 
 // ─── 批量创建面试转写 ────────────────────────────────────────
-async function batchCreateTranscripts(config, records, summary, schedulingHr) {
+async function batchCreateTranscripts(config, records, summary) {
   const { larkCli, baseToken, transcriptTableId, batchSize, timeoutMs, dryRun } = config;
 
   if (dryRun) {
@@ -354,7 +353,7 @@ async function batchCreateTranscripts(config, records, summary, schedulingHr) {
 
   // 为每条记录组装字段
   const prepared = records.map((record) => {
-    const fields = transcriptFields(record, schedulingHr);
+    const fields = transcriptFields(record);
     return { record, fields };
   });
 
@@ -493,7 +492,7 @@ export async function sync(options) {
   }
 
   // 批量创建面试转写
-  const transcriptResults = await batchCreateTranscripts(config, deduped.records, summary, schedulingHr);
+  const transcriptResults = await batchCreateTranscripts(config, deduped.records, summary);
 
   // 组装摘要（姓名原文，不做脱敏）
   summary.records = transcriptResults.map(({ record, recordId, operation, error }) => ({

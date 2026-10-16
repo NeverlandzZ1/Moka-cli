@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * backfill-interviewer-user.mjs — 回填「面试官(人员)」列
+ * backfill-interviewer-user.mjs — 回填「面试官(人员)」与「面试安排HR(人员)」列
  *
  * 场景:
  *   面试转写表有两列面试官信息 —
  *     - 「面试官」 = text 列, sync 时按 record.interviewerNames.join(", ") 写入。
  *     - 「面试官(人员)」 = user 列, 需要形如 [{ id: "ou_xxx" }] 的对象数组;
  *       sync 脚本不写这列 — 因为姓名到 open_id 的映射不在采集数据里。
- *   本脚本在 sync/dedup 之后运行, 扫描全表把「面试官(人员)」为空但「面试官」有值
- *   的记录挑出来, 用两种手段解析姓名 → open_id, 逐条 upsert 回填。
+ *   本脚本在 sync/dedup 之后运行：
+ *     - 面试官：扫描全表，把「面试官(人员)」为空但「面试官」有值的记录挑出来；
+ *     - 面试安排 HR：读取本次 JSON 顶层「面试安排HR」，仅匹配本次 records[] 的
+ *       applicationId + interviewId，不依赖也不写入 HR 文本列。
+ *   两类姓名均解析为 open_id 后，以 [{ id: "ou_xxx" }] 写入对应人员列。
  *
  * 4 步执行 (基于用户验证过的成功路径):
- *   1) +field-list 拿三个字段的 field_id, 校验类型 (text / user / anything)。
- *   2) +record-list --field-id ... 按行投影拉全量, 拿到每行的
- *      (record_id, 面试官 text, 面试官(人员) users, 面试ID) 元组。定位空行。
+ *   1) +field-list 拿五个字段的 field_id。
+ *   2) +record-list --field-id ... 按行投影拉全量；面试官扫描文本/人员列，
+ *      HR 人员列只匹配本次申请ID + 面试ID 联合键。定位空行。
  *   3) 建 name → open_id 映射:
  *      - 来源 A: 已填充记录 — 若同表其他行 面试官 = "A、B" 且 面试官(人员) = [{id:1},{id:2}],
  *        按顺序拆解得到 A→1、B→2。
@@ -35,9 +38,10 @@
  *   而不是脚本猜。
  *
  * 用法:
- *   node backfill-interviewer-user.mjs [options]
+ *   node backfill-interviewer-user.mjs --input <transcript.json> [options]
  *
  * 选项:
+ *   --input <path>              本次导出的 JSON（用于顶层 HR 姓名和联合键）
  *   --lark-cli <path>           lark-cli 可执行文件路径
  *   --config <path>             配置文件路径 (默认 ~/.opencli/moka-config.json)
  *   --feishu-base-url <url>     覆盖 config 里的 feishu_base_url
@@ -68,6 +72,8 @@ const DEFAULTS = Object.freeze({
 // 脚本会做归一化匹配, 不强制表里用哪一种写法。
 const INTERVIEWER_TEXT_FIELD_NAME = "面试官";
 const INTERVIEWER_USER_FIELD_NAME = "面试官 (人员 )"; // 首选精确匹配
+const SCHEDULING_HR_USER_FIELD_NAME = "面试安排HR(人员)";
+const APPLICATION_ID_FIELD_NAME = "申请ID";
 const INTERVIEW_ID_FIELD_NAME = "面试ID";
 
 // 姓名字符串拆分分隔符: sync 脚本用 ", " 拼接, 但同一张 Base 里既往人工录入可能
@@ -89,6 +95,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") out.help = true;
+    else if (arg === "--input") out.input = argv[++i];
     else if (arg === "--lark-cli") out.larkCli = argv[++i];
     else if (arg === "--config") out.configPath = argv[++i];
     else if (arg === "--feishu-base-url") out.feishuBaseUrl = argv[++i];
@@ -104,9 +111,10 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    "Usage: node backfill-interviewer-user.mjs [options]",
+    "Usage: node backfill-interviewer-user.mjs --input <transcript.json> [options]",
     "",
     "Options:",
+    "  --input <path>              Current transcript JSON (required)",
     "  --lark-cli <path>           Path to lark-cli executable",
     "  --config <path>             Config JSON (default ~/.opencli/moka-config.json)",
     "  --feishu-base-url <url>     Override feishu_base_url from config",
@@ -303,6 +311,8 @@ async function resolveFieldIds(config, tableId) {
   return {
     interviewerText: pickField(INTERVIEWER_TEXT_FIELD_NAME, "text"),
     interviewerUser: pickField(INTERVIEWER_USER_FIELD_NAME, "user"),
+    schedulingHrUser: pickField(SCHEDULING_HR_USER_FIELD_NAME, "user"),
+    applicationId: pickField(APPLICATION_ID_FIELD_NAME, "any"),
     interviewId: pickField(INTERVIEW_ID_FIELD_NAME, "any"),
   };
 }
@@ -399,6 +409,42 @@ function normalizeName(s) {
     .replace(/[）]/g, ")");
 }
 
+function normalizeBusinessId(value) {
+  return String(value ?? "").trim();
+}
+
+function businessKey(applicationId, interviewId) {
+  const app = normalizeBusinessId(applicationId);
+  const interview = normalizeBusinessId(interviewId);
+  return app && interview ? `${app}:${interview}` : "";
+}
+
+function readBackfillInput(inputPath) {
+  if (!inputPath) throw new BackfillError("--input is required");
+  let input;
+  try {
+    input = JSON.parse(fsSync.readFileSync(path.resolve(inputPath), "utf8"));
+  } catch (error) {
+    throw new BackfillError(`Failed to read input JSON ${inputPath}: ${error.message}`);
+  }
+  const schedulingHr = String(input?.["面试安排HR"] ?? "").trim();
+  if (!schedulingHr) {
+    throw new BackfillError("Input JSON must contain a non-empty top-level 面试安排HR field");
+  }
+  if (!Array.isArray(input?.records)) {
+    throw new BackfillError("Input JSON must contain a records array");
+  }
+  const recordKeys = new Set();
+  for (const record of input.records) {
+    const key = businessKey(record?.applicationId, record?.interviewId);
+    if (!key) {
+      throw new BackfillError("Each input record must contain applicationId and interviewId");
+    }
+    recordKeys.add(key);
+  }
+  return { schedulingHr, recordKeys };
+}
+
 // ─── 从已填充记录里挖 name → open_id ─────────────────────────
 // 只取『名字数量与人员数量一致』的行, 顺序对齐;
 // 一致时才能安全建立映射, 避免顺序错位污染。
@@ -468,8 +514,13 @@ async function searchUserByName(config, name) {
 }
 
 // ─── 单条 upsert 回填 ────────────────────────────────────────
-async function upsertUserField(config, tableId, recordId, userFieldName, openIds) {
-  const payload = { [userFieldName]: openIds.map((id) => ({ id })) };
+async function upsertUserFields(config, tableId, recordId, fieldsToOpenIds) {
+  const payload = Object.fromEntries(
+    Object.entries(fieldsToOpenIds).map(([fieldName, openIds]) => [
+      fieldName,
+      openIds.map((id) => ({ id })),
+    ]),
+  );
   const payloadJson = JSON.stringify(payload);
   const args = [
     "base", "+record-upsert",
@@ -511,6 +562,7 @@ async function runConcurrent(tasks, concurrency) {
 
 // ─── 主流程 ──────────────────────────────────────────────────
 export async function backfill(options) {
+  const { schedulingHr, recordKeys } = readBackfillInput(options.input);
   const target = resolveTarget(options);
   const config = {
     ...DEFAULTS,
@@ -534,36 +586,62 @@ export async function backfill(options) {
     namesResolvedFromSearch: 0,
     unresolvedNames: [],
     errors: [],
+    schedulingHr: {
+      name: schedulingHr,
+      inputRecords: recordKeys.size,
+      matchedRecords: 0,
+      needsBackfill: 0,
+      alreadyFilled: 0,
+      backfilled: 0,
+      skipped: 0,
+      failed: 0,
+      unresolved: null,
+    },
   };
 
   // ── 步骤 1: field-list ──
   const fields = await resolveFieldIds(config, config.transcriptTableId);
-  const textIdx = 0, userIdx = 1, idIdx = 2;
-  const fieldIds = [fields.interviewerText.id, fields.interviewerUser.id, fields.interviewId.id];
+  const textIdx = 0, userIdx = 1, hrUserIdx = 2, applicationIdIdx = 3, interviewIdIdx = 4;
+  const fieldIds = [
+    fields.interviewerText.id,
+    fields.interviewerUser.id,
+    fields.schedulingHrUser.id,
+    fields.applicationId.id,
+    fields.interviewId.id,
+  ];
 
   // ── 步骤 2: record-list 拉全量, 定位空行 ──
   const { rows, recordIds } = await fetchAllRecords(config, config.transcriptTableId, fieldIds);
   summary.scanned = rows.length;
 
   const needing = []; // [{ recordId, textVal, names, interviewId }]
+  const hrNeeding = []; // 仅本次输入联合键对应且 HR 人员列为空的 Base 记录
+  const matchedHrKeys = new Set();
   for (let i = 0; i < rows.length; i++) {
     const textVal = extractText(rows[i][textIdx]);
     const users = extractUsers(rows[i][userIdx]);
     const names = splitNames(textVal);
-    if (names.length === 0) continue;            // 面试官 text 空: 无从下手, 跳过
-    if (users.length > 0) continue;              // 人员列已有值: 尊重现有数据
-    needing.push({
-      recordId: recordIds[i],
-      textVal,
-      names,
-      interviewId: extractText(rows[i][idIdx]),
-    });
+    const applicationId = extractText(rows[i][applicationIdIdx]);
+    const interviewId = extractText(rows[i][interviewIdIdx]);
+    if (names.length > 0 && users.length === 0) {
+      needing.push({ recordId: recordIds[i], textVal, names, interviewId });
+    }
+
+    const key = businessKey(applicationId, interviewId);
+    if (key && recordKeys.has(key)) {
+      matchedHrKeys.add(key);
+      const hrUsers = extractUsers(rows[i][hrUserIdx]);
+      if (hrUsers.length === 0) {
+        hrNeeding.push({ recordId: recordIds[i], applicationId, interviewId, key });
+      } else {
+        summary.schedulingHr.alreadyFilled += 1;
+      }
+    }
   }
   summary.needsBackfill = needing.length;
-
-  if (needing.length === 0) {
-    return summary; // nothing to do
-  }
+  summary.schedulingHr.matchedRecords = matchedHrKeys.size;
+  summary.schedulingHr.needsBackfill = hrNeeding.length;
+  summary.schedulingHr.skipped = recordKeys.size - matchedHrKeys.size;
 
   // ── 步骤 3: 建 name → open_id 映射 ──
   const { map: nameMap, skipped: existingSkipped } = buildNameMapFromExisting(rows, textIdx, userIdx);
@@ -592,8 +670,39 @@ export async function backfill(options) {
 
   summary.namesResolvedFromExisting = initialMapSize;
 
-  // ── 步骤 4: 逐条 upsert ──
-  const tasks = needing.map((row) => async () => {
+  // 面试安排 HR 没有文本列，姓名只来自本次 JSON 顶层；独立解析一次。
+  let schedulingHrOpenId = null;
+  if (hrNeeding.length > 0) {
+    const resolved = await searchUserByName(config, schedulingHr);
+    if (resolved.openId) {
+      schedulingHrOpenId = resolved.openId;
+    } else {
+      summary.schedulingHr.unresolved = {
+        name: schedulingHr,
+        reason: resolved.error || "no result",
+      };
+      summary.schedulingHr.skipped += hrNeeding.length;
+    }
+  }
+
+  // ── 步骤 4: 按 record 合并两类人员字段后逐条 upsert ──
+  // 同一条记录若同时缺面试官和 HR，只发一次请求，避免并发写同一 record。
+  const plans = new Map();
+  function ensurePlan(row) {
+    if (!plans.has(row.recordId)) {
+      plans.set(row.recordId, {
+        recordId: row.recordId,
+        interviewId: row.interviewId,
+        fields: {},
+        interviewer: false,
+        schedulingHr: false,
+        interviewerUnresolved: [],
+      });
+    }
+    return plans.get(row.recordId);
+  }
+
+  for (const row of needing) {
     const openIds = [];
     const unresolved = [];
     for (const n of row.names) {
@@ -610,31 +719,49 @@ export async function backfill(options) {
         phase: "resolve-names",
         message: `all names unresolved: ${unresolved.join(", ")}`,
       });
-      return;
+      continue;
     }
+    const plan = ensurePlan(row);
+    plan.fields[fields.interviewerUser.name] = openIds;
+    plan.interviewer = true;
+    plan.interviewerUnresolved = unresolved;
+  }
+
+  if (schedulingHrOpenId) {
+    for (const row of hrNeeding) {
+      const plan = ensurePlan(row);
+      plan.fields[fields.schedulingHrUser.name] = [schedulingHrOpenId];
+      plan.schedulingHr = true;
+    }
+  }
+
+  const tasks = [...plans.values()].map((plan) => async () => {
     if (config.dryRun) {
-      summary.backfilled += 1;
+      if (plan.interviewer) summary.backfilled += 1;
+      if (plan.schedulingHr) summary.schedulingHr.backfilled += 1;
       return;
     }
-    const res = await upsertUserField(
-      config, config.transcriptTableId, row.recordId, fields.interviewerUser.name, openIds,
+    const res = await upsertUserFields(
+      config, config.transcriptTableId, plan.recordId, plan.fields,
     );
     if (res.ok) {
-      summary.backfilled += 1;
-      if (unresolved.length > 0) {
+      if (plan.interviewer) summary.backfilled += 1;
+      if (plan.schedulingHr) summary.schedulingHr.backfilled += 1;
+      if (plan.interviewerUnresolved.length > 0) {
         // 部分填充: 有一部分姓名没解析上, 但已尽力
         summary.errors.push({
-          recordId: row.recordId,
-          interviewId: row.interviewId,
+          recordId: plan.recordId,
+          interviewId: plan.interviewId,
           phase: "partial-fill",
-          message: `partial fill; unresolved names: ${unresolved.join(", ")}`,
+          message: `partial fill; unresolved names: ${plan.interviewerUnresolved.join(", ")}`,
         });
       }
     } else {
-      summary.failed += 1;
+      if (plan.interviewer) summary.failed += 1;
+      if (plan.schedulingHr) summary.schedulingHr.failed += 1;
       summary.errors.push({
-        recordId: row.recordId,
-        interviewId: row.interviewId,
+        recordId: plan.recordId,
+        interviewId: plan.interviewId,
         phase: "upsert",
         message: res.error,
       });
@@ -644,7 +771,7 @@ export async function backfill(options) {
   await runConcurrent(tasks, config.concurrency);
 
   // ── 汇总 ok 判定 ──
-  if (summary.failed > 0) summary.ok = false;
+  if (summary.failed > 0 || summary.schedulingHr.failed > 0) summary.ok = false;
   if (existingSkipped.length > 0) {
     summary.errors.push({
       phase: "build-name-map",

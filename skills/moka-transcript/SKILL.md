@@ -44,7 +44,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
 - 已通知预筛脚本：`scripts/filter-notified-records.mjs`（只读 Base；在评分前按「申请ID + 面试ID」过滤 `是否已通知=是` 的记录）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
-- 面试官(人员)回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行,用「面试官」text 列 + 同表已有映射 + `contact +search-user` 兜底,把姓名解析为 open_id 写入「面试官(人员)」user 列；**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
+- 人员字段回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行；面试官从每行「面试官」text 解析，面试安排 HR 从本次 JSON 顶层 `面试安排HR` 解析并按联合键限定本次记录；两者分别写入对应 user 列。**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
 - 脚本契约：`references/lark-base-write.md`
 - 定时报告引擎（必需的独立 skill）：`interviewer-review`。它是评分规范、统计、渲染、校验与 HTML 模板的**唯一真源**；本 skill 不保留副本，不得降级回手写 HTML 或旧 `generate-report.mjs`。
 - 定时报告云盘目录：`https://trip.larkenterprise.com/drive/folder/NY5IfFoh5lQmIaddwoSc6oJznBc`，folder token 为 `NY5IfFoh5lQmIaddwoSc6oJznBc`。报告上传后使用飞书返回的真实文件 URL 写入 `record.reviewReportUrl`。
@@ -326,7 +326,7 @@ lark-cli 授权失效的场景不在本步骤主动预检，交给 sync/dedup �
 
 **lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup 等脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，面试官(人员)回填由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成并上传到固定飞书云盘目录，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，两类人员字段由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成并上传到固定飞书云盘目录，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
 
 ### 2. 校招：覆盖导出
 
@@ -498,9 +498,9 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 
 **任何一条不满足**就必须在汇报里写"sync 未完全成功",并附上 `stats.errors` 或 stdout 中的失败详情(不含逐字稿正文)。**不要**因为 ok:true 就直接判定通过——旧脚本在有失败时会误报 ok:true,新脚本已收紧,但若字段缺失说明脚本还没更新。
 
-sync 脚本把 JSON 顶层 `面试安排HR` 复制到本次每一条飞书记录的同名文本列，并自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值、「面试复盘报告」文本 URL 列,以及「是否标红」「是否已通知」两列单选状态——「是否标红」由 `reviewScores.redLineHits` 是否非空派生,命中红线写「是」、否则写「否」;「是否已通知」本流水线固定写「否」,后续通知动作由其他流程处理,不在本 skill 职责范围内。两个单选列必须写严格字面量「是」/「否」,不带空格、不改字符,飞书按选项名精确匹配。评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「处理状态」列本流水线不管。「面试官(人员)」列由后置的 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填(见下文 后处理-5),失败时该列留空,不影响本步已写入的其他列。
+sync 脚本自动写入「面试官」文本列、「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值、「面试复盘报告」文本 URL 列,以及「是否标红」「是否已通知」两列单选状态——「是否标红」由 `reviewScores.redLineHits` 是否非空派生,命中红线写「是」、否则写「否」;「是否已通知」本流水线固定写「否」,后续通知动作由其他流程处理,不在本 skill 职责范围内。两个单选列必须写严格字面量「是」/「否」,不带空格、不改字符,飞书按选项名精确匹配。评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「处理状态」列本流水线不管。
 
-目标 Base 必须存在显示名严格为「面试安排HR」的文本列。字段不存在或类型不兼容时 sync 会失败；按错误信息在 Base 中补齐/改回文本列后再由 HR 决定是否重跑，不得静默跳过该字段。
+JSON 顶层 `面试安排HR` **不作为文本列写入**。目标 Base 不需要、也不应依赖「面试安排HR」文本字段；它只作为后处理-5 的人员解析来源，最终写入「面试安排HR(人员)」人员列。
 
 「面试复盘报告」列**必须是文本或超链接类型**——若飞书 Base 上是附件类型,OpenAPI 不允许写附件单元格,整条 record 会被拒(实测走这个坑)。当前 Base 已经由用户手动改成文本列,直接写字符串 URL。
 
@@ -535,29 +535,34 @@ node "<Skill目录>/scripts/deduplicate-lark-base.mjs"
 
 脚本自行清理 lark-cli 临时请求文件。Agent 不删除默认导出文件。
 
-### 后处理-5. 回填「面试官(人员)」列
+### 后处理-5. 回填「面试官(人员)」与「面试安排HR(人员)」列
 
 ```text
-node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
+node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输出路径>"
 ```
 
 若 `lark-cli` 不在 PATH,追加 `--lark-cli "<路径>"`。
 
 **为什么放在 dedup 之后**: 先去重再回填,只处理留下的最新一条,不浪费 API 调用去填马上要被删的旧记录。
 
+**两类人员字段必须区分来源**:
+
+- 「面试官(人员)」：继续读取每一行已有的「面试官」文本列，逐行解析人员。
+- 「面试安排HR(人员)」：没有对应文本列。直接读取本次 JSON 顶层 `面试安排HR`，并按 `申请ID + 面试ID` 只回填本次 JSON `records[]` 对应的行，绝不能把当前账号 HR 批量写到历史其他记录。
+
 **脚本做什么**(4 步):
 
-1. 拿「面试官」text 列 / 「面试官(人员)」user 列 / 「面试ID」三列的 field_id;人员列显示名支持半/全角括号与括号内外空格的容错匹配。
-2. `+record-list --field-id ...` 按行投影拉全表,挑出「面试官 text 有值,但 面试官(人员) user 为空」的记录。
-3. 建 `name → open_id` 映射:先从同表已填充记录里按顺序拆解(要求名字数量 = 人员数量,不匹配的行跳过);缺失的姓名再用 `lark-cli contact +search-user --query <name>` 兜底。
-4. 逐条 `+record-upsert --record-id X --json @./payload-file.json`,默认 3 并发。
+1. 拿「面试官」text / 「面试官(人员)」user / 「面试安排HR(人员)」user / 「申请ID」/「面试ID」五列的 field_id;人员列显示名支持半/全角括号与括号内外空格的容错匹配。
+2. `+record-list --field-id ...` 按行投影拉全表：面试官按文本列找待回填行；HR 按本次 JSON 的联合键找待回填行。两类人员列已有值时均尊重现有数据，不覆盖。
+3. 建 `name → open_id` 映射：面试官先复用同表已有映射，再用 contact 搜索；面试安排 HR 直接用 JSON 顶层姓名单独搜索一次。
+4. 逐条 `+record-upsert --record-id X --json @./payload-file.json`,默认 3 并发；同一行同时缺两类人员时合并成一次写入。人员字段值固定为 `[{"id":"ou_xxx"}]`。
 
 **Windows 兼容修复**(2026-09-14 验证通过,已写入脚本):
 
 - **`search-user` 查询词提取中文名**:Moka 导出的面试官姓名格式为 `Iris Cheng （程冬芳）`,直接传给 `--query` 会因空格被 lark-cli 拆成位置参数报错。脚本现在从括号中提取中文名(如 `程冬芳`)搜索,避免空格问题。无括号时提取连续中文字符。
 - **`runLarkCli` 强制走 @file 模式**:所有 JSON payload(含中文字段名如 `面试官 (人员 )`)一律写入临时文件用 `@./file.json` 引用,不走命令行内联。Windows `spawn` + `shell:true` 会经过 cmd.exe 编码链路,把 UTF-8 中文字段名转成 GBK 导致 `invalid character` 解析错误。
 
-**成功判定**:退出码 0 且 stdout JSON `ok === true` 且 `failed === 0`。`unresolvedNames` 可以非空——`search-user` 找不到的姓名会挂在里面,不算 fatal,该 record 若还有其他姓名解析成功,人员列会**部分回填**;所有姓名都解析不上的 record 会归到 `skipped`,人员列继续留空。
+**成功判定**:退出码 0 且 stdout JSON `ok === true`、`failed === 0` 且 `schedulingHr.failed === 0`。`unresolvedNames` 或 `schedulingHr.unresolved` 可以非空——找不到的姓名不会猜 open_id，对应人员列保持空并在汇总中明确列出。
 
 **失败/部分失败时的处置**:回填失败**不阻塞本次采集结果汇报**,把 stdout 的 `unresolvedNames` 和 `errors` 摘要附到 后处理-6 汇总里,让 HR 判断是否人工补录。**不要**因为回填失败而重跑整个流水线,也不要重装工具或改脚本。
 
@@ -580,6 +585,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
 - 面试官(人员)回填结果: `backfilled` / `skipped` / `failed`,若有 `unresolvedNames` 逐个列出(仅姓名,不带 open_id)
+- 面试安排HR(人员)回填结果: `schedulingHr.backfilled` / `skipped` / `failed`,若有 `unresolved` 列出姓名与简短原因(不带 open_id)
 - 上述每条简要信息
 - JSON 的绝对保存路径
 - 飞书 Base 链接
@@ -597,7 +603,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 4. 先运行 `filter-notified-records.mjs`，仅保留 Base 中不存在相同「申请ID + 面试ID」且「是否已通知=是」历史行的 records；预筛失败立即中断。
 5. 遍历预筛后的 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
 6. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
-7. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`（把顶层 `面试安排HR` 写入每条飞书记录），然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
+7. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后以同一 JSON 路径调用 `backfill-interviewer-user.mjs --input "<PATH>"`；最后一步分别回填面试官人员与面试安排 HR 人员。
 
 **成功判定**：导出、报告校验、每份 Drive 上传、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告或上传失败不阻断其他记录，但必须在汇总中体现。
 
@@ -703,7 +709,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - [ ] stats 证据摘要只用 `interviewer-review/scripts/extract_evidence.cjs`，每次一个本地 stats JSON，通过该 skill 的 `execScript` 调用；不临时生成 `.cjs`，不用本地 `runCommand` 指向仓库副本，也不用 `node -e` / `python -c`。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
 - [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
-- [ ] backfill-interviewer-user.mjs 在 dedup 之后执行,失败/`unresolvedNames`不阻塞汇报,把摘要附到汇总即可。
+- [ ] backfill-interviewer-user.mjs 在 dedup 之后执行且必须传 `--input <本次JSON>`；面试官从行内文本解析，面试安排 HR 从 JSON 顶层解析并只匹配本次联合键。失败/未解析姓名不阻塞汇报,把两类摘要附到汇总即可。
 - [ ] 出现任何写入失败**不重跑整个流水线**——把 `errors` 附到汇总,让 HR 决定。
 - [ ] **批量报告生成策略**：子代理只承担"读逐字稿→分析→写 analysis.json"，渲染和校验由自己串行跑。子代理返回后必须检查 analysis.json 完整性，空结果则自行接管，不停顿。**子代理不可用时由本 Agent 串行处理,不得降低质量标准。**
 - [ ] **执行器边界正确**：`opencli moka`、CDP、`lark-cli` 和 Moka 自带 `.mjs` 使用本地 `lobe-local-system/runCommand`；只有 `interviewer-review` 随 skill 分发的脚本和模板通过 `execScript` 调用。Cookie 只由本地 `opencli` 内部读取。
@@ -719,5 +725,5 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。
 - sync 脚本不保证无重复——重复由 dedup 脚本统一清理。
 - dedup 脚本使用逐条删除（`+record-delete --record-id`），不使用 batch delete 接口——后者在实测中会静默失败。
-- 不写入或维护面试官信息表（已废弃）；面试官姓名作为 text 写入面试转写表的「面试官」列，dedup 之后由 `backfill-interviewer-user.mjs` 通过 `contact +search-user` 解析出 open_id 回填「面试官(人员)」user 列。
+- 不写入或维护面试官信息表（已废弃）；面试官姓名作为 text 写入「面试官」列，再解析回填「面试官(人员)」。面试安排 HR 没有 text 列，只从 JSON 顶层 `面试安排HR` 解析并回填「面试安排HR(人员)」。
 - 默认 JSON 是单次中转文件，不承担历史存储。

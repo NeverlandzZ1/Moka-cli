@@ -12,6 +12,15 @@ state.records ||= [];
 state.nextId ||= 1;
 state.calls ||= { creates: 0, updates: 0, lists: 0 };
 
+const fieldDefinitions = [
+  ["fld_interviewer_text", "面试官", 1],
+  ["fld_interviewer_user", "面试官 (人员 )", 11],
+  ["fld_scheduling_hr_user", "面试安排HR(人员)", 11],
+  ["fld_application_id", "申请ID", 2],
+  ["fld_interview_id", "面试ID", 2],
+];
+const fieldNameById = new Map(fieldDefinitions.map(([id, name]) => [id, name]));
+
 function flag(name) {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
@@ -40,19 +49,39 @@ function failure(message) {
 const command = args[1];
 const tableId = flag("--table-id");
 
-if (command === "+record-list") {
+if (command === "+field-list") {
+  success({
+    items: fieldDefinitions.map(([field_id, field_name, type]) => ({ field_id, field_name, type })),
+    has_more: false,
+  });
+} else if (command === "+record-list") {
   state.calls.lists += 1;
   const filter = await jsonFlag("--filter-json");
   const offset = Number(flag("--offset") || 0);
   const limit = Number(flag("--limit") || 100);
   const conditions = filter?.conditions || [];
-  const items = state.records
+  const matchingRecords = state.records
     .filter((record) => record.tableId === tableId)
     .filter((record) => conditions.every(([field, operator, value]) => operator === "==" && record.fields[field] === value))
-    .slice(offset, offset + limit)
-    .map((record) => ({ record_id: record.record_id, fields: record.fields }));
+    .slice(offset, offset + limit);
+  const requestedFieldIds = args.flatMap((arg, index) => arg === "--field-id" ? [args[index + 1]] : []);
   await save();
-  success({ items, has_more: false });
+  if (requestedFieldIds.length > 0) {
+    success({
+      data: matchingRecords.map((record) => requestedFieldIds.map((id) => record.fields[fieldNameById.get(id)] ?? null)),
+      record_id_list: matchingRecords.map((record) => record.record_id),
+      has_more: false,
+    });
+  } else {
+    success({
+      items: matchingRecords.map((record) => ({ record_id: record.record_id, fields: record.fields })),
+      has_more: false,
+    });
+  }
+} else if (command === "+search-user") {
+  const query = flag("--query");
+  const user = state.contactUsers?.[query];
+  success({ users: user ? [{ open_id: user.open_id, name: user.name || query }] : [] });
 } else if (command === "+record-upsert") {
   const recordId = flag("--record-id");
   const fields = await jsonFlag("--json");

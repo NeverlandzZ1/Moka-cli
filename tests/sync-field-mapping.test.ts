@@ -8,10 +8,10 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
 const scriptUrl = new URL('../skills/moka-transcript/scripts/sync-lark-base.mjs', import.meta.url).href;
 
 describe('sync-lark-base field mapping', () => {
-  it('copies the top-level scheduling HR into every transcript row', async () => {
+  it('does not write scheduling HR as a text field', async () => {
     const expression = [
       `import { transcriptFields } from ${JSON.stringify(scriptUrl)};`,
-      `const fields = transcriptFields({ applicationId: 1, interviewId: 2, interviewerNames: [], reviewScores: {} }, 'HR User');`,
+      `const fields = transcriptFields({ applicationId: 1, interviewId: 2, interviewerNames: [], reviewScores: {} });`,
       `process.stdout.write(JSON.stringify(fields));`,
     ].join('\n');
     const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', expression], {
@@ -19,6 +19,6 @@ describe('sync-lark-base field mapping', () => {
     });
     const fields = JSON.parse(stdout) as Record<string, unknown>;
 
-    expect(fields['面试安排HR']).toBe('HR User');
+    expect(fields).not.toHaveProperty('面试安排HR');
   });
 });
