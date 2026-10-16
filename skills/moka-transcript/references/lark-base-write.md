@@ -78,10 +78,11 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 
 ### 输入
 
-输入必须是 JSON 对象，包含 `records` 数组。字段映射：
+输入必须是 JSON 对象，包含非空的顶层 `面试安排HR` 和 `records` 数组。`面试安排HR` 来自 `export-transcripts` 对当前 Moka 登录账号的查询，不属于单条 record；sync 会把该值复制到本次每条飞书记录。字段映射：
 
 | 飞书字段 | 输入字段 | 写入格式 |
 |---|---|---|
+| 面试安排HR | 顶层 `面试安排HR` | text；复制到每条 record，缺失或为空时脚本拒绝写入 |
 | 候选人姓名 | `candidateName` | text |
 | 岗位名称 | `jobTitle` | text |
 | 面试官 | `interviewerNames` | 数组以 `, ` 拼接 |
@@ -112,6 +113,7 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<transcript.json绝对�
 > **「是否标红」「是否已通知」是飞书单选列**(不是复选/多选)。写入值必须与 Base 上选项名**逐字节相等**——多一个空格或写成半角字母都会被飞书拒收或落成新选项。当前脚本硬编码「是」/「否」两个字面量,若有人在 Base 上把选项名改了,先在 Base 侧改回来,不改脚本。
 > **「面试复盘报告」列在飞书 Base 里必须是「文本」或「超链接」类型**(不能是「附件」)。当前 `asOptionalUrl()` 把合法 URL 直接返回**裸字符串**,`+record-batch-create` payload 里作为文本值写入,飞书文本列/超链接列都接受该格式。若真实写入报"URL 列类型不匹配",先在飞书 Base 界面把该列类型改为「文本」而不是回来改脚本。
 > 「处理状态」列不在本流水线的写入范围内。「面试官(人员)」列由 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填,失败或姓名解析不上时该列留空,不影响 sync 本步已写入的其他列。
+> 目标 Base 必须预先存在显示名严格为「面试安排HR」的文本列；该字段缺失或类型不兼容会让整批写入失败，不能静默降级为空。
 
 ### 输出
 

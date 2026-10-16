@@ -43,7 +43,11 @@ async function setup(initialState: Record<string, unknown> = {}) {
 }
 
 async function runScript(inputPath: string, statePath: string, records: unknown[]) {
-  await writeFile(inputPath, JSON.stringify({ generatedAt: new Date().toISOString(), records }), "utf8");
+  await writeFile(inputPath, JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    "面试安排HR": "HR User",
+    records,
+  }), "utf8");
   const result = await execFileAsync(process.execPath, [scriptPath, "--input", inputPath], {
     cwd: repoRoot,
     env: {

@@ -298,6 +298,8 @@ opencli moka export-transcripts --offline --output "<绝对输出路径>" --over
 
 `--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。若应用 session 已失效，CLI 会自动使用同一文件里的 Passport cookie 获取 ticket、调用 uniLogin、写回新 session 并重试原请求。`--overwrite` 覆盖旧文件，得到今天默认模式的全量 JSON。
 
+导出成功后，确认 JSON 顶层存在非空的 `面试安排HR`，其值由 CLI 从当前 Moka 登录账号的 `getCurrent` 接口取得。缺失或为空说明插件版本过旧或身份接口异常，应中断并要求更新插件后重新导出；不得从面试官姓名、逐字稿或飞书登录用户猜测负责 HR。
+
 若命令最终仍报"Passport 登录态无法换取 ticket / 应用会话和 Passport 登录态均无法恢复 / 登录态失效"，说明 CLI 已经尝试过静默续期但 Passport 本身也过期、被服务端撤销，或 cookie 文件不完整。此时中断本次采集，汇报"Moka Passport 登录态无法自动恢复，需要 HR 重新执行首次配置入口的登录步骤或替换完整 moka-cookies.json"，不要在定时任务里尝试自动打开 Chrome，也不要由 Agent 读取或拼装 cookie。
 
 ### 2. 共用后处理
@@ -339,6 +341,8 @@ opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f j
 
 `--overwrite` 保证 JSON 只包含本次校招结果，覆盖昨天遗留内容。**本步骤不写飞书**——校招 JSON 先落在 `<绝对输出路径>` 中,等社招合并后再一次性同步。
 
+校招导出后确认 JSON 顶层 `面试安排HR` 非空；它必须来自 CLI 的当前 Moka 登录账号接口，不能从面试记录推断。
+
 ### 3. 社招：合并导出到同一 JSON
 
 仅在校招导出成功后执行：
@@ -349,6 +353,8 @@ opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
 ```
 
 **注意此处不传 `--overwrite`**——`export-transcripts` 默认行为是增量合并：以 `applicationId + interviewId` 为联合键，新记录追加,重复联合键覆盖旧值,校招 records 保留。合并完成后 `<绝对输出路径>` 里 records 数 = 校招条数 + 社招条数（去重后）。
+
+社招合并完成后再次确认顶层 `面试安排HR` 非空，并以本次社招导出时的当前登录账号值为准。
 
 若社招导出失败，保留当前 JSON，报告失败,便于人工排查;不得声称全流程成功。
 
@@ -473,7 +479,7 @@ python scripts/validate_report.py "<报告.html>" --template assets/report-templ
 - 上传失败：写 `record.reviewError = "drive upload failed: <简短原因>"`，保留本地 HTML，继续下一条。不得把报告上传到其他目录。
 - **上传成功后立即转移 owner**：每份 HTML 上传成功后，立即调用 `drive permission.members transfer_owner` 把 owner 转给 HR 指定接收人（固定 open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`，即 Julia Tian（田颖），tianying@trip.com）。参数固定：`--params '{"token":"<file_token>","type":"file","remove_old_owner":false,"old_owner_perm":"full_access","need_notification":false}' --data '{"member_type":"openid","member_id":"ou_0f7d6f3c5c579945fae70cb2348e6091"}' --yes --as user`。`remove_old_owner=false` 保留上传者 full_access，`need_notification=false` 不打扰接收人。转移失败不阻塞该条记录（URL 已写入），但在汇报中标注"owner 转移失败"让 HR 手动处理。
 
-所有 record 处理完成后，把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`；顶层 `generatedAt` / `source` / `errors` / `stats` 保留原值。
+所有 record 处理完成后，把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`；顶层 `generatedAt` / `面试安排HR` / `source` / `errors` / `stats` 保留原值。不得在报告后处理阶段丢失或改写 `面试安排HR`。
 
 ### 后处理-3. 单次批量写入飞书
 
@@ -492,7 +498,9 @@ node "<Skill目录>/scripts/sync-lark-base.mjs" --input "<绝对输出路径>"
 
 **任何一条不满足**就必须在汇报里写"sync 未完全成功",并附上 `stats.errors` 或 stdout 中的失败详情(不含逐字稿正文)。**不要**因为 ok:true 就直接判定通过——旧脚本在有失败时会误报 ok:true,新脚本已收紧,但若字段缺失说明脚本还没更新。
 
-sync 脚本自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值、「面试复盘报告」文本 URL 列,以及「是否标红」「是否已通知」两列单选状态——「是否标红」由 `reviewScores.redLineHits` 是否非空派生,命中红线写「是」、否则写「否」;「是否已通知」本流水线固定写「否」,后续通知动作由其他流程处理,不在本 skill 职责范围内。两个单选列必须写严格字面量「是」/「否」,不带空格、不改字符,飞书按选项名精确匹配。评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「处理状态」列本流水线不管。「面试官(人员)」列由后置的 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填(见下文 后处理-5),失败时该列留空,不影响本步已写入的其他列。
+sync 脚本把 JSON 顶层 `面试安排HR` 复制到本次每一条飞书记录的同名文本列，并自动带上「面试官复盘-开场与流程 / 提问质量 / 倾听 / 追问深度 / 尺度把控 / 反馈体验」6 列数值、「面试复盘报告」文本 URL 列,以及「是否标红」「是否已通知」两列单选状态——「是否标红」由 `reviewScores.redLineHits` 是否非空派生,命中红线写「是」、否则写「否」;「是否已通知」本流水线固定写「否」,后续通知动作由其他流程处理,不在本 skill 职责范围内。两个单选列必须写严格字面量「是」/「否」,不带空格、不改字符,飞书按选项名精确匹配。评分或 URL 缺失的 record 对应字段自动为空,不影响其他列。「处理状态」列本流水线不管。「面试官(人员)」列由后置的 `backfill-interviewer-user.mjs` 在 dedup 之后自动回填(见下文 后处理-5),失败时该列留空,不影响本步已写入的其他列。
+
+目标 Base 必须存在显示名严格为「面试安排HR」的文本列。字段不存在或类型不兼容时 sync 会失败；按错误信息在 Base 中补齐/改回文本列后再由 HR 决定是否重跑，不得静默跳过该字段。
 
 「面试复盘报告」列**必须是文本或超链接类型**——若飞书 Base 上是附件类型,OpenAPI 不允许写附件单元格,整条 record 会被拒(实测走这个坑)。当前 Base 已经由用户手动改成文本列,直接写字符串 URL。
 
@@ -585,11 +593,11 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 
 1. 解析本 skill 与 `interviewer-review` 的绝对目录，确认后者的原版 `SKILL.md`、统计、渲染、校验和模板均存在。
 2. 定位 lark-cli；Windows 上设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`。
-3. 默认模式执行 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`；全模式依次 CDP 自检、校招覆盖、社招合并，期间不写飞书。
+3. 默认模式执行 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`；全模式依次 CDP 自检、校招覆盖、社招合并，期间不写飞书。导出后确认 JSON 顶层 `面试安排HR` 非空。
 4. 先运行 `filter-notified-records.mjs`，仅保留 Base 中不存在相同「申请ID + 面试ID」且「是否已通知=是」历史行的 records；预筛失败立即中断。
 5. 遍历预筛后的 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
 6. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
-7. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
+7. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`（把顶层 `面试安排HR` 写入每条飞书记录），然后 `deduplicate-lark-base.mjs`，最后 `backfill-interviewer-user.mjs`。
 
 **成功判定**：导出、报告校验、每份 Drive 上传、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告或上传失败不阻断其他记录，但必须在汇总中体现。
 
@@ -668,6 +676,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs"
 - [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。**注意 moka-transcript 和 interviewer-review 是两个不同的 skill 目录**,各自的 `.mjs`/`.py` 用各自目录的绝对路径。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
 - [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
+- [ ] 导出 JSON 顶层 `面试安排HR` 非空，且报告处理后仍原样保留；不得从面试官或逐字稿推断该值。
 - [ ] 已在报告前运行 `filter-notified-records.mjs`；仅将 `remainingRecords` 交给后续链路。任何同「申请ID + 面试ID」且 Base「是否已通知=是」的 record 必须完全跳过。
 - [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。上传成功后立即转移 owner 给 Julia Tian（open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`）。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。Windows 上用 `python` 而非 `python3`。
