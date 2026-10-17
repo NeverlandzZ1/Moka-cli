@@ -66,7 +66,7 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 
 ### 1. 探测并补齐环境
 
-识别操作系统，依次检查 Chrome、Node.js、npm、Git、OpenCLI、Moka 插件和 lark-cli。已有且可用时跳过安装，不要重复破坏现有环境。
+识别操作系统，依次检查 Chrome、Node.js、npm、Git、OpenCLI、Moka 插件和 lark-cli。已有且可用时跳过安装，不要重复破坏现有环境。这里必须区分 OpenCLI 主程序和 Moka 插件：**OpenCLI 主程序只检查兼容性和可用性，不做例行升级；Moka 插件则必须检查是否与 GitHub 最新提交一致，不能因为本机已经安装就跳过更新检查。**
 
 最低要求：
 
@@ -74,8 +74,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - Node.js 20 以上；新装时优先 Node.js 22 LTS
 - npm
 - Git
-- `@jackwener/opencli@latest`
-- Moka 插件
+- `@jackwener/opencli`，版本满足 `>=1.8.6 <2`
+- Moka 插件，来源为 `github:NeverlandzZ1/Moka-cli` 且安装提交与该仓库远端 `HEAD` 一致
 - `@larksuite/cli@latest`
 
 先执行只读检查：
@@ -98,31 +98,49 @@ lark-cli auth status --json --verify
 
 安装系统软件前遵守宿主 Agent 的审批要求。安装后若当前终端没有刷新 PATH，启动新终端或刷新环境，再重新验证版本。不得声称未验证的安装已经成功。
 
-安装或升级 OpenCLI：
+OpenCLI 主程序处理规则：
+
+- 未安装时才执行安装：
 
 ```text
 npm install -g @jackwener/opencli@latest
 ```
 
-插件不存在时安装：
+- 已安装、版本满足 `>=1.8.6 <2` 且上述命令可以正常运行时，**保留当前版本，不执行 `npm update`，也不为了更新 Moka 插件而升级 OpenCLI**。
+- 只有版本不兼容或程序损坏时才修复/重装 OpenCLI，并在操作前说明原因。
+
+#### Moka 插件 GitHub 一致性检查（普通配置入口强制执行）
+
+每次在普通对话中执行首次配置或环境检测，都必须完成以下检查。`opencli plugin list` 只证明“装过插件”，**不能**证明插件是最新版本。
+
+1. 执行 `git ls-remote https://github.com/NeverlandzZ1/Moka-cli.git HEAD`，取得 GitHub 当前 `HEAD` 的完整 commit hash。远端查询失败时不得假装一致；明确汇报网络/GitHub 检查失败并停止后续配置。
+2. 执行 `opencli plugin list -f json`，确认插件名为 `moka-transcripts`；同时只读取 `~/.opencli/plugins.lock.json` 中该插件的 `source` 和 `commitHash` 元数据。不得输出该目录下 cookie 等登录凭据。
+3. 插件不存在时安装：
 
 ```text
 opencli plugin install github:NeverlandzZ1/Moka-cli
 ```
 
-插件已存在时更新：
+4. 插件来自 GitHub，但本地 `commitHash` 缺失或与远端 `HEAD` 不同，则更新：
 
 ```text
 opencli plugin update moka-transcripts
 ```
 
-若更新后 `opencli moka export-transcripts --help` 里看不到 `--offline` 参数,说明 OpenCLI 缓存了旧命令注册,手动重装一次:
+5. 更新或安装后必须重新读取 `plugins.lock.json`，再次比较 commit hash。若仍不一致，允许重装一次以清除旧命令缓存：
 
 ```text
 opencli plugin uninstall moka-transcripts
 opencli plugin install github:NeverlandzZ1/Moka-cli
-opencli plugin list
 ```
+
+重装后再比较一次；仍不一致就停止配置并如实汇报，不进入登录、飞书授权或定时任务创建。
+
+6. 若 `source.kind` 为 `local`，说明这是开发者本地源码绑定：读取 `source.path` 对应 Git 仓库的当前 `HEAD`，与 GitHub 远端 `HEAD` 比较。完全一致时可继续；不一致或工作区存在未提交改动时，**不得自动 pull、reset、卸载或覆盖本地源码**，应说明这是本地开发版本并让用户先处理或明确选择改装 GitHub 版。
+
+7. commit 一致后，再执行 `opencli moka export-transcripts --help`，确认至少存在 `--offline`、`--output` 和 `--overwrite`。任一缺失都视为插件注册仍旧，按上面的“一次重装”规则处理。
+
+该强制更新检查**只属于普通对话的首次配置/环境检测入口**。定时采集入口不得联网检查 GitHub、不得执行插件更新或重装；若导出结果缺少新版必需的顶层 `面试安排HR`，定时任务应中断并要求用户回到普通配置入口更新插件。
 
 安装 lark-cli：
 
