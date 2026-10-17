@@ -1,0 +1,19 @@
+skills/moka-transcript/SKILL.md
+  s_84fa8680e37da6::t_3993c43ae15cb7 69,77-78,101-103,109-118,124,130,137-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "d83c25e35e7aa8d7e6ac83bd1aba8bd2960e2fca",
+  "prompts": {},
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
