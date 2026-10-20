@@ -1,0 +1,84 @@
+src/cdp.ts
+  s_84fa8680e37da6::t_8cb75cbb47cb72 182-187
+  s_84fa8680e37da6::t_133f7033372afe 123-124
+  s_84fa8680e37da6::t_8fb517131ddc56 120,122,127-130
+src/plugin.ts
+  s_84fa8680e37da6::t_8fb517131ddc56 199
+  s_84fa8680e37da6::t_bde557d9861ac0 2,82,85-86,89-94,108-112
+  s_84fa8680e37da6::t_b95c42c6a67aff 5,20,174-196,202-215
+  s_84fa8680e37da6::t_645b0b0f42e9f0 6,343,358
+  s_84fa8680e37da6::t_5e8374343a7800 80-81,83,87-88,96,106-107,113-114,197
+  s_84fa8680e37da6::t_579e96d1a7b35e 84,95,97-105
+  s_84fa8680e37da6::t_9a1cbac715d4f7 198,200-201
+moka.js
+  s_84fa8680e37da6::t_a66024c0501320 1347,1349-1350
+  s_84fa8680e37da6::t_6baba567788461 569-582,732-735,789-857,1485,1500
+  s_84fa8680e37da6::t_d30c87bb81f4e3 312,360-364,1324-1345,1351-1363
+  s_84fa8680e37da6::t_6d91a89a931f9c 1243-1244,1246,1256,1264-1265,1269,1346
+  s_84fa8680e37da6::t_d744be6384752f 683
+  s_84fa8680e37da6::t_8c6c8e17b2c36e 3,1245,1248-1252,1254,1266-1268
+  s_84fa8680e37da6::t_f14f430a271545 1247,1253,1255,1257-1263
+  s_84fa8680e37da6::t_20aeba3dcce2a9 313,315-317,1348
+skills/pack.py
+  h_3279bd1d34f6be 1,7
+tests/lark-sync-script.test.ts
+  s_84fa8680e37da6::t_dad95913bde08d 10
+  s_84fa8680e37da6::t_b7fd8161609e3b 41,43-44,47,53-59,80,82-84,92-95,97,100,102-104,107-112,115-119,122-128,131-135,138-142,145-147,151-152,155
+  s_84fa8680e37da6::t_0d7d2ba7ab24af 153-154
+tests/sync-field-mapping.test.ts
+  s_84fa8680e37da6::t_dad95913bde08d 8
+tests/cdp-capture.test.ts
+  s_84fa8680e37da6::t_8fb517131ddc56 55-56,59-61,66,69,71,73-75,81,84
+  s_84fa8680e37da6::t_a3918df850e827 47
+  s_84fa8680e37da6::t_3f2408c03b169b 54,57-58,62-65,67-68,70,72,76-79,85-88
+  s_84fa8680e37da6::t_8cb75cbb47cb72 15,80,82-83
+tests/collector.test.ts
+  s_84fa8680e37da6::t_d75ac1b407d544 5-11,82-178
+src/moka-api.ts
+  s_84fa8680e37da6::t_22149e5661f3be 46-50,52-55,57-63
+  s_84fa8680e37da6::t_9c12a01b74acb2 51,56
+  s_84fa8680e37da6::t_a5fa52873100cb 185
+tests/fixtures/mock-lark-cli.mjs
+  s_84fa8680e37da6::t_11a51bafee4abc 13,52-70,118-125,138
+src/collector.ts
+  s_84fa8680e37da6::t_81fc1cf694415f 6-12,21-27,90-167
+tests/moka-api.test.ts
+  s_84fa8680e37da6::t_d75ac1b407d544 6,73-94
+tests/backfill-user-fields.test.ts
+  s_84fa8680e37da6::t_dad95913bde08d 10
+README.md
+  s_84fa8680e37da6::t_fc9d7b0b655514 68,71,76-78,155
+  s_84fa8680e37da6::t_e8390942ea594d 86,95,120-123
+  s_84fa8680e37da6::t_a5fa52873100cb 38,74,163,185,188,203,245
+TESTING.md
+  s_84fa8680e37da6::t_a5fa52873100cb 35-36,41,142,340-342,379
+  s_84fa8680e37da6::t_e6cc31491a1fa3 122
+  s_84fa8680e37da6::t_e8390942ea594d 266-268
+  s_84fa8680e37da6::t_20caecdb9d182d 143
+  s_84fa8680e37da6::t_fc9d7b0b655514 90,121,124,134-140
+  s_84fa8680e37da6::t_4e99089956161f 68,99
+reference/moka-interview-apis.md
+  s_84fa8680e37da6::t_a5fa52873100cb 7,9,71,94,257,260,262-264,268,273,277,301
+  s_84fa8680e37da6::t_e8390942ea594d 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "582f2b1040a666fd1e36f23726c64471ea20e405",
+  "prompts": {},
+  "humans": {
+    "h_3279bd1d34f6be": {
+      "author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  },
+  "sessions": {
+    "s_84fa8680e37da6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a5eb-b64b-79b1-8b5c-251a329ef898",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
