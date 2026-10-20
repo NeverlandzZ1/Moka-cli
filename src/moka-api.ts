@@ -43,6 +43,24 @@ export async function getCurrentUser(client: HttpClient): Promise<MokaCurrentUse
   return users[0]!;
 }
 
+export async function setHireModeHttp(
+  client: HttpClient,
+  mode: HireMode,
+): Promise<HireModeResult> {
+  const currentHireMode = HIRE_MODE_VALUES[mode];
+  const response = await client.fetchJson(API_PATHS.updateCurrentHireMode, {
+    method: 'PUT',
+    body: { currentHireMode },
+    timeoutMs: 30_000,
+  });
+  assertApiResponse(response, 'update_currenthiremode_fields');
+  return {
+    mode,
+    modeLabel: mode === 'campus' ? '校招' : '社招',
+    currentHireMode,
+  };
+}
+
 export async function setHireMode(
   page: IPage,
   bridge: CDPBridge,
@@ -164,7 +182,7 @@ async function resolveBaseBody(options: ListApplicationsOptions): Promise<JsonRe
     return await discoverInterviewListPayload(options.page, options.bridge);
   }
   throw new CommandExecutionError(
-    'Moka interviewList 请求体模板缺失。请先运行 opencli moka login 或 opencli moka export-transcripts(默认走 CDP)一次,让 CLI 抓取并缓存请求体模板。',
+    'Moka interviewList 请求体模板缺失。请运行 opencli moka login，登录后执行 opencli moka capture-payload -f json，再重试离线采集。',
   );
 }
 

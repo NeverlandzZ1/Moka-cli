@@ -32,11 +32,13 @@ moka.js                     OpenCLI 实际加载的构建产物
 src/                        TypeScript 源码
 tests/                      Vitest 单元测试
 reference/                  Moka 接口说明
+skills/moka-transcriptV2/  与插件同仓维护的定时任务 Skill
+skills/pack.py              Skill ZIP 打包脚本
 README.md                   HR 使用文档
 TESTING.md                  开发测试文档
 ```
 
-Skill 不属于本仓库，应在独立仓库中开发和发布。
+Skill 与插件在同一仓库维护，但 OpenCLI 插件名仍是 `moka-transcripts`；只修改 Skill 文件夹名不改变插件注册名。
 
 ## 3. 构建与单元测试
 
@@ -63,7 +65,7 @@ npm run build
 
 ## 4. 本地安装插件
 
-修改源码后重新装到 OpenCLI 的完整流程(每次改完 `src/` 都要跑一遍):
+修改源码后先重新构建；注册信息变化或本地/GitHub 安装来源切换时，按以下流程重新安装：
 
 ```powershell
 # 1) 重新构建 moka.js(OpenCLI 只加载根目录 moka.js,不会跑 src/plugin.ts)
@@ -85,6 +87,7 @@ opencli plugin install "$PWD"
 # 4) 验证命令都注册上了(新增 --offline 请在 export-transcripts --help 里确认)
 opencli plugin list -f json
 opencli moka login --help
+opencli moka capture-payload --help
 opencli moka status --help
 opencli moka mode --help
 opencli moka applications --help
@@ -93,7 +96,7 @@ opencli moka transcript --help
 opencli moka export-transcripts --help
 ```
 
-`opencli plugin install .` 采用目录链接方式,理论上后续修改源码执行 `npm run build` 覆盖 `moka.js` 后可直接生效,不用重新 install。但当以下任一情况发生时**必须**完整重装(重新走一遍上面 1~3 步):
+本地路径安装采用目录链接方式，后续仅修改实现时执行 `npm run build` 覆盖 `moka.js` 即可生效。当以下任一情况发生时**必须**完整重装（重新走一遍上面 1~3 步）：
 
 - 修改了 `opencli-plugin.json`(命令元信息、参数、别名等)
 - 从 GitHub 版本切到本地开发版本,或反过来
@@ -115,10 +118,10 @@ npm install
 ~/.opencli/mokaData/transcript.json                      默认逐字稿输出路径(HR 数据)
 ```
 
-- `moka-cookies.json` 在 `login`/`status`/`mode` 命令成功后自动刷新一次；`export-transcripts --offline` 发现应用 session 失效时，会用其中的 Passport cookie 调用 ticket + uniLogin 静默续期，把响应中的 `Set-Cookie` 合并落盘后重试原请求。
-- `moka-interview-list-payload.json` 在首次带 CDP 的 `export-transcripts` 中通过 `discoverInterviewListPayload` 抓一次,后续 `--offline` 直接从此文件复用。
+- `moka-cookies.json` 在 `login`/`status`/`mode`/`capture-payload` 命令成功后自动刷新；`export-transcripts --offline` 发现应用 session 失效时，会用其中的 Passport cookie 调用 ticket + uniLogin 静默续期，把响应中的 `Set-Cookie` 合并落盘后重试原请求。增强后的导出会在同一 HTTP client 中依次切换校招、社招并合并结果，不连接 CDP。
+- `moka-interview-list-payload.json` 由 `capture-payload` 在登录完成后点击总览中的“加载更多”并捕获，不刷新页面；后续 `--offline` 直接从此文件复用。带 CDP 的 `applications` / `export-transcripts` 在缓存缺失时仍可兼容捕获。
 
-**首次使用必须至少跑一次带 CDP 的流程**才能生成这两个缓存(通常就是 `opencli moka login` + 一次不带 `--offline` 的 `export-transcripts`),之后 HR 关闭 Chrome也能靠这两个文件走纯 HTTP。若人工切换账号，要替换完整 cookie 文件以保留 `passport.mokahr.com` / `.mokahr.com` 的登录态，不能只保留应用 session cookie。
+**首次使用必须执行 `opencli moka login`，登录完成后再执行一次 `opencli moka capture-payload -f json`**。只有返回 `offlineReady: true` 后，HR 才关闭 Chrome，之后依靠这两个缓存走纯 HTTP。若人工切换账号，重新执行这两个步骤；不要只替换应用 session cookie。
 
 ## 5. 登录与 Chrome 回归
 
@@ -127,6 +130,16 @@ npm install
 ```powershell
 opencli moka login -f json
 ```
+
+完成登录后执行：
+
+```powershell
+opencli moka capture-payload -f json
+```
+
+检查返回 `offlineReady: true`、`payloadSaved: true`，且 `currentUserName` 是当前登录的 HR；命令不得输出 payload 正文或 Cookie。成功后可以关闭 Chrome。
+
+登录后即使当前停在仪表盘或其他 Moka 页面，`capture-payload` 也应通过 CDP 原生鼠标点击侧栏“面试安排”进入 `/interviews/overview`，等待“加载更多”出现后再捕获；不得为捕获动作使用 `Page.reload` 或 `page.goto`，也不要求用户手动切换页面。
 
 首次冷启动应满足：
 
@@ -250,6 +263,9 @@ opencli moka export-transcripts `
 
 检查：
 
+- 当前 HR 用户接口只调用一次，顶层 `面试安排HR` 只写一次。
+- 模式切换顺序固定为校招（`currentHireMode=2`）后社招（`currentHireMode=1`）。
+- 校招和社招记录按 `applicationId + interviewId` 合并，重复联合键只保留一条。
 - `records` 中候选人、岗位、面试官和逐字稿关联正确。
 - `stats.applications` 是应聘记录数。
 - `stats.interviews` 是合并后保存的面试数。
@@ -321,9 +337,9 @@ opencli moka export-transcripts `
 如果提示找不到“加载更多”或捕获超时：
 
 1. 确认专用 Chrome 已登录并正常显示面试总览。
-2. 在总览页调整一个只读筛选条件以触发列表请求。
-3. 重新执行 `applications -v`。
-4. 检查 Network 中是否出现 `interviewList`。
+2. 确认总览列表的“加载更多”按钮可用；必要时人工进入面试安排页检查账号权限。
+3. 重新执行 `opencli moka capture-payload -f json`，只以该命令成功结果确认离线准备完成。
+4. 若仍失败，检查 Network 中点击“加载更多”后是否出现 `interviewList`。
 
 仅在自动捕获失效时使用 `--request-json`：
 
@@ -360,7 +376,7 @@ git status --short
 
 - `package.json` 与 `opencli-plugin.json` 版本一致。
 - 根目录 `moka.js` 是最新构建结果并已提交。
-- 仓库中不存在 `skills/` 目录。
+- `skills/moka-transcriptV2/SKILL.md` 的 `name` 与目录名一致，且 `python skills/pack.py` 生成 `skills/moka-transcriptV2.zip`；ZIP 内包含 Skill、references 与 scripts。
 - 没有真实逐字稿、候选人导出 JSON、Cookie 或 Token。
 - README 中的 GitHub 安装地址与当前 `origin` 一致。
 - 没有个人电脑绝对路径、用户名或公司内部临时目录。

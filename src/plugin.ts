@@ -1,9 +1,9 @@
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { ArgumentError } from '@jackwener/opencli/errors';
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from '@jackwener/opencli/errors';
 import { API_PATHS, DEFAULT_CDP_PORT, MOKA_OVERVIEW_URL } from './constants.js';
 import { ensureChromeWithCdp } from './chrome.js';
-import { probeMokaLogin, withMokaPage } from './cdp.js';
-import { collectTranscripts, writeCollection } from './collector.js';
+import { discoverInterviewListPayload, probeMokaLogin, withMokaPage } from './cdp.js';
+import { collectAllModeTranscripts, writeCollection } from './collector.js';
 import {
   getCurrentUser,
   getMeetingSummary,
@@ -17,6 +17,7 @@ import { createHttpClient, type HttpClient } from './http-client.js';
 import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
 import type { IPage } from '@jackwener/opencli/types';
 import type { ApplicationRecord, HireMode, Id, JsonRecord } from './types.js';
+import { defaultPayloadPath, writePayloadBundle } from './payload-store.js';
 
 const commonPortArg = {
   name: 'port',
@@ -76,6 +77,41 @@ function collectionOptions(kwargs: Record<string, unknown>): {
   };
 }
 
+async function ensureInterviewOverview(page: IPage): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  let navigationClicked = false;
+  while (Date.now() < deadline) {
+    const ready = await page.evaluate(() => {
+      const atOverview = window.location.pathname === '/interviews/overview';
+      const hasLoadMore = Array.from(document.querySelectorAll('button')).some((button) => (
+        button.classList.contains('table-load-more')
+        || button.textContent?.trim() === '加载更多'
+      ));
+      return {
+        url: window.location.href,
+        bodyLength: document.body?.innerText?.length ?? 0,
+        hasLoadMore,
+      };
+    }).catch(() => undefined);
+    if (ready?.url.includes('/interviews/overview') && ready.bodyLength > 0 && ready.hasLoadMore) return;
+
+    if (!navigationClicked && ready && !ready.url.includes('/interviews/overview')) {
+      try {
+        await page.click('a[href="/interviews"], a[href$="/interviews"]', { firstOnMulti: true });
+        navigationClicked = true;
+      } catch {
+        // The dashboard shell can render before the sidebar. Keep polling until it is clickable.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new CommandExecutionError(
+    navigationClicked
+      ? '已点击 Moka 侧栏“面试安排”，但面试总览未能在 20 秒内加载完成'
+      : '当前 Moka 页面未找到侧栏“面试安排”入口，无法进入面试总览捕获 payload',
+  );
+}
+
 async function withHttpClient<T>(
   kwargs: Record<string, unknown>,
   fn: (client: HttpClient, ctx: { page?: IPage; bridge?: CDPBridge }) => Promise<T>,
@@ -133,6 +169,50 @@ cli({
       profileDir: launch.profileDir,
     }];
   },
+});
+
+cli({
+  site: 'moka',
+  name: 'capture-payload',
+  description: '登录完成后在线捕获离线导出所需的 interviewList 请求体',
+  access: 'read',
+  example: 'opencli moka capture-payload -f json',
+  strategy: Strategy.LOCAL,
+  browser: false,
+  defaultFormat: 'json',
+  args: [commonPortArg],
+  columns: ['offlineReady', 'mokaLogin', 'currentUserName', 'payloadSaved', 'payloadPath', 'message'],
+  func: async (kwargs) => withMokaPage(
+    intArg(kwargs.port, DEFAULT_CDP_PORT),
+    async (page, bridge) => {
+      const status = await probeMokaLogin(page);
+      if (status.mokaLogin !== 'authenticated') {
+        throw new AuthRequiredError(
+          'app.mokahr.com',
+          'Moka 尚未登录。请先在当前 CDP Chrome 中完成登录，再运行 opencli moka capture-payload。',
+        );
+      }
+
+      await dumpCookiesFromBridge(bridge);
+      await ensureInterviewOverview(page);
+      const payload = await discoverInterviewListPayload(page, bridge, 20, {
+        forceCapture: true,
+        persist: false,
+      });
+      const saved = writePayloadBundle(payload);
+      const currentUser = await getCurrentUser(createHttpClient());
+
+      return [{
+        offlineReady: true,
+        mokaLogin: 'authenticated',
+        currentUserName: currentUser.name,
+        payloadSaved: true,
+        payloadPath: defaultPayloadPath(),
+        payloadUpdatedAt: saved.updatedAt,
+        message: '离线导出准备完成，现在可以关闭 CDP Chrome。',
+      }];
+    },
+  ),
 });
 
 cli({
@@ -260,7 +340,7 @@ cli({
   site: 'moka',
   name: 'export-transcripts',
   aliases: ['export'],
-  description: '导出候选人、岗位、面试官和全部面试逐字稿',
+  description: '依次抓取校招和社招并合并导出候选人、岗位、面试官和全部面试逐字稿',
   access: 'read',
   example: 'opencli moka export-transcripts --output ./moka-transcripts.json -f json',
   strategy: Strategy.LOCAL,
@@ -275,20 +355,11 @@ cli({
     { name: 'request-json', valueRequired: true, help: '高级用法：覆盖 interviewList 请求体 JSON' },
   ],
   func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => {
-    const currentUser = await getCurrentUser(client);
-    const collected = await collectTranscripts(client, {
+    const result = await collectAllModeTranscripts(client, {
       ...collectionOptions(kwargs),
       ...(ctx.page ? { page: ctx.page } : {}),
       ...(ctx.bridge ? { bridge: ctx.bridge } : {}),
     });
-    const result = {
-      generatedAt: collected.generatedAt,
-      "面试安排HR": currentUser.name,
-      source: collected.source,
-      records: collected.records,
-      errors: collected.errors,
-      stats: collected.stats,
-    };
     const written = typeof kwargs.output === 'string' && kwargs.output.trim()
       ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) })
       : undefined;

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, '..');
-const scriptUrl = new URL('../skills/moka-transcript/scripts/sync-lark-base.mjs', import.meta.url).href;
+const scriptUrl = new URL('../skills/moka-transcriptV2/scripts/sync-lark-base.mjs', import.meta.url).href;
 
 describe('sync-lark-base field mapping', () => {
   it('does not write scheduling HR as a text field', async () => {

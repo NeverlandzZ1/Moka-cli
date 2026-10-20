@@ -10,7 +10,7 @@ if (!statePath) throw new Error("MOCK_LARK_STATE is required");
 const state = JSON.parse(await fs.readFile(statePath, "utf8"));
 state.records ||= [];
 state.nextId ||= 1;
-state.calls ||= { creates: 0, updates: 0, lists: 0 };
+state.calls ||= { creates: 0, updates: 0, lists: 0, batchCreates: 0 };
 
 const fieldDefinitions = [
   ["fld_interviewer_text", "面试官", 1],
@@ -49,7 +49,25 @@ function failure(message) {
 const command = args[1];
 const tableId = flag("--table-id");
 
-if (command === "+field-list") {
+if (command === "+record-batch-create") {
+  state.calls.batchCreates = (state.calls.batchCreates || 0) + 1;
+  const payload = await jsonFlag("--json");
+  if (state.failBatchOnce && !state.failBatchUsed) {
+    state.failBatchUsed = true;
+    await save();
+    failure("simulated batch-create failure");
+  } else {
+    const ids = [];
+    for (const row of payload.rows) {
+      const fields = Object.fromEntries(payload.fields.map((name, index) => [name, row[index]]));
+      const id = `rec${String(state.nextId++).padStart(5, "0")}`;
+      state.records.push({ record_id: id, tableId, fields });
+      ids.push(id);
+    }
+    await save();
+    success({ record_id_list: ids });
+  }
+} else if (command === "+field-list") {
   success({
     items: fieldDefinitions.map(([field_id, field_name, type]) => ({ field_id, field_name, type })),
     has_more: false,
@@ -97,8 +115,14 @@ if (command === "+field-list") {
     }
   } else {
     state.calls.creates += 1;
-    const id = `rec${String(state.nextId++).padStart(5, "0")}`;
-    state.records.push({ record_id: id, tableId, fields });
+    const failedByInterviewId = state.failCreateForInterviewId !== undefined
+      && fields["面试ID"] === state.failCreateForInterviewId;
+    if (failedByInterviewId) {
+      await save();
+      failure("simulated record-create failure");
+    } else {
+      const id = `rec${String(state.nextId++).padStart(5, "0")}`;
+      state.records.push({ record_id: id, tableId, fields });
     const transcriptFailure = tableId === "tblUYL6KszcCEzuw"
       && state.ambiguousTranscriptCreateOnce
       && !state.ambiguousTranscriptCreateUsed;
@@ -111,6 +135,7 @@ if (command === "+field-list") {
     await save();
     if (shouldFailAfterCommit) failure("simulated connection loss after commit");
     else success({ record: { record_id: id, fields }, created: true });
+    }
   }
 } else {
   failure(`unsupported mock command: ${command}`);

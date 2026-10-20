@@ -117,9 +117,16 @@ export async function discoverInterviewListPayload(
   page: IPage,
   bridge: CDPBridge,
   timeoutSeconds = 15,
+  options: { forceCapture?: boolean; persist?: boolean } = {},
 ): Promise<JsonRecord> {
-  const cached = await page.evaluate((key: string) => sessionStorage.getItem(key), INTERVIEW_LIST_PAYLOAD_CACHE_KEY);
+  const cached = options.forceCapture
+    ? undefined
+    : await page.evaluate((key: string) => sessionStorage.getItem(key), INTERVIEW_LIST_PAYLOAD_CACHE_KEY);
   if (cached) return parseJsonObject(cached, '缓存的 Moka interviewList 请求体');
+
+  if (options.forceCapture) {
+    await page.evaluate((key: string) => sessionStorage.removeItem(key), INTERVIEW_LIST_PAYLOAD_CACHE_KEY);
+  }
 
   await bridge.send('Network.enable');
   let handler: ((params: unknown) => void) | undefined;
@@ -172,10 +179,12 @@ export async function discoverInterviewListPayload(
         INTERVIEW_LIST_PAYLOAD_CACHE_KEY,
         JSON.stringify(payload),
       );
-      try {
-        writePayloadBundle(payload);
-      } catch {
-        // Persistence is best-effort; keep the freshly captured payload usable in memory.
+      if (options.persist !== false) {
+        try {
+          writePayloadBundle(payload);
+        } catch {
+          // Persistence is best-effort; keep the freshly captured payload usable in memory.
+        }
       }
       return payload;
     } catch (error) {

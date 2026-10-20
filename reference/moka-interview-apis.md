@@ -4,9 +4,9 @@
 
 ## 共同前提
 
-- 用户已经在浏览器中登录 `https://app.mokahr.com`。
+- 首次准备时，用户在专用 CDP Chrome 中登录 `https://app.mokahr.com`，再执行 `capture-payload`。
 - 调用账号拥有相应候选人和面试数据的查看权限。
-- 建议通过 Chrome CDP 在已登录的 Moka 页面上下文中发起同源请求，让浏览器自动携带登录态。
+- 日常 `--offline` 导出使用 CLI 保存的 Cookie 和 `interviewList` 请求体模板发 HTTP 请求；采集阶段不依赖 Chrome 或 CDP。
 - Cookie、JWT、`moka-token`、`csrfCk`、`connect.sid` 等会话凭据只允许由 CLI 内部维护，不写入导出 JSON，也不得在命令输出或日志中展示。
 - 四个读取接口均为 `POST`；模式切换接口为 `PUT`。带 JSON 请求体的接口使用 `Content-Type: application/json`；`getCurrent` 发送空请求体。
 - HTTP `200` 仅表示请求到达服务端，还要检查响应中的 `code`、`success` 和 `msg`。
@@ -47,7 +47,7 @@ Content-Type: application/json
 - `1`：社招（`social`）
 - `2`：校招（`campus`）
 
-该接口切换当前账号的招聘模式。切换后，后续三个读取接口的路径不变，但返回数据跟随当前模式。Moka 是单页应用，仅调用接口不会更新当前页面的内存状态和菜单；同 URL 导航也不等同于刷新按钮。实际测试中第一次刷新还可能停在慢加载状态，因此插件会通过 CDP 的 `Page.reload` 间隔短暂时间执行两次真正的浏览器刷新。它使用已登录 Moka Chrome 的会话，不应在命令或文档中硬编码 Cookie/Token。
+该接口切换当前账号的招聘模式。切换后，后续三个读取接口的路径不变，但返回数据立即跟随当前模式。`export-transcripts` 使用同一个 HTTP client 依次切到校招、抓取数据，再切到社招、抓取数据，不需要刷新页面或连接 CDP。手动 `mode` 命令仍会刷新 Moka 单页应用，使当前页面的菜单和内存状态同步；页面刷新只服务于 UI，不是纯 HTTP 导出的前提。不得在命令或文档中硬编码 Cookie/Token。
 
 ---
 
@@ -68,7 +68,7 @@ https://app.mokahr.com/interviews/overview
 
 请求体包含分页和筛选条件。当前已确认响应中的 `currentPage`、`pageSize` 和 `totalPage`，但请求 Payload 的完整字段仍应以浏览器 Network 中的实际请求为准。
 
-当前插件不会猜测完整 Payload。执行 `applications` 或 `export-transcripts` 时，先检查当前 Moka 标签页里是否已有插件自己缓存的请求体模板；没有缓存时，会监听 CDP 的 `Network.requestWillBeSent`，只读点击一次总览列表底部的“加载更多”，捕获 Moka 前端自己发出的 `interviewList` POST 请求体。捕获结果只缓存在当前标签页的专用 `sessionStorage` 键中。实际采集会覆盖模板里的时间范围、排序和页码，固定查询北京时间今天；岗位等其他可复用字段继续沿用模板。这个过程不会刷新 HR 当前页面。
+当前插件不会猜测完整 Payload。首次登录后运行 `opencli moka capture-payload -f json`：命令在需要时以 CDP 鼠标点击侧栏“面试安排”进入总览，监听 `Network.requestWillBeSent`，点击“加载更多”，捕获前端发出的 `interviewList` POST 请求体。模板保存到 `~/.opencli/mokaData/moka-interview-list-payload.json`；当前标签页的 `sessionStorage` 仅供在线捕获辅助复用。`applications` 或 `export-transcripts` 会优先读取磁盘模板；在线模式缺失时可尝试 CDP 捕获，离线模式缺失时应重新登录并运行 `capture-payload`。实际采集会覆盖模板里的时间范围、排序和页码，固定查询北京时间今天；其他可复用字段沿用模板。
 
 默认调用时，插件以捕获的请求体作为字段模板，动态按北京时间生成今天的完整查询范围：
 
@@ -91,7 +91,7 @@ https://app.mokahr.com/interviews/overview
 
 `minStartDate` 和 `maxStartDate` 每天动态计算，后续页只修改 `currentPage`。
 
-插件根据响应中的分页信息自动拉完今天的全部页，再按 `applicationId` 去重，并且后续对每个唯一应聘记录只请求一次 `interviewCard`。显式传入 `--request-json` 时不生成默认的今天范围，而是只执行用户提供的单一查询。
+插件根据响应中的分页信息拉完今天的全部页，再按 `applicationId` 去重，随后对每个唯一应聘记录请求 `interviewCard`。`export-transcripts` 在两个内部采集阶段分别执行上述过程，最终按 `applicationId + interviewId` 合并记录。显式传入 `--request-json` 时，每个采集阶段都使用用户提供的查询模板，不生成默认的今天范围。
 
 ### 主要响应结构
 
@@ -254,26 +254,27 @@ Content-Type: application/json
 
 ---
 
-## 完整调用链路（今天候选人）
+## 完整调用链路（今日全部面试）
 
 ```text
-1. 用户登录 Moka
+1. 用户通过 CDP Chrome 登录 Moka，运行 capture-payload 保存 Cookie 与 interviewList 模板
    ↓
-2. 按北京时间查询今天，并分页调用 interviewList 直至最后一页
+2. export-transcripts --offline 调用 getCurrent 一次，得到顶层「面试安排HR」
+   ↓
+3. CLI 依次切换招聘模式；每个模式按北京时间查询今天，并分页调用 interviewList 直至最后一页
    ↓
    获得：applicationId + 候选人姓名 + 岗位名称
    ↓
-3. 对每个 applicationId 调用 interviewCard
-   或打开 /interviews/overview/application/{applicationId}/interviews 触发接口
+4. 对每个 applicationId 调用 interviewCard
    ↓
    遍历所有 entities[]
    获得：interviewId + 面试官姓名数组 + 面试轮次 + 面试时间
    ↓
-4. 对每个 (applicationId, interviewId) 调用 getMeetingSummary
+5. 对每个 (applicationId, interviewId) 调用 getMeetingSummary
    ↓
    获得：transcript + AI 总结 + 逐题分析
    ↓
-5. 按 (applicationId, interviewId) 合并并输出
+6. 按 (applicationId, interviewId) 合并两个采集阶段并输出
 ```
 
 建议每场面试输出一条标准记录：
@@ -297,7 +298,7 @@ Content-Type: application/json
 
 ## 实现注意事项
 
-- 全程复用浏览器现有登录态，不保存密码、Cookie 或 Token。
+- 首次登录由浏览器完成；CLI 内部保存 Cookie 和请求体模板以支持离线采集，不保存密码或验证码，也不在导出 JSON 中写入 Cookie 或 Token。
 - `interviewList` 只查询今天，并且必须遍历今天范围内的全部分页。
 - `interviewCard` 必须遍历全部 `data[]` 和 `entities[]`。
 - 多位面试官保存为数组并去重。

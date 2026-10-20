@@ -1,15 +1,15 @@
 ---
-name: moka-transcript
-description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维表格。用于用户明确调用 moka-transcript、要求安装 Node.js/OpenCLI/lark-cli/Moka 插件并登录授权，或收到"定时任务，调用moka-transcript skill，抓取今日默认模式转写。"或"定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。"时；支持环境安装、Moka CDP 登录、本地登录态持久化、飞书用户授权、可选创建默认模式(纯 HTTP、无需 CDP 常驻)或全模式(需 CDP 常驻切换校招/社招)的定时任务并批量写入飞书 Base 后自动去重。
+name: moka-transcriptV2
+description: 为 HR 配置 Moka 离线采集环境，或在定时任务中抓取今日全部面试转写、生成面试官复盘报告并回填飞书。首次登录后用 capture-payload 验证离线材料；定时任务只运行一次全量导出与后处理，不让用户选择采集模式。
 ---
 
-# Moka Transcript
+# Moka Transcript V2
 
-只处理用户有权访问的 Moka 和飞书数据。首次登录及全模式切换使用本机 CDP Chrome；默认模式采集使用 CLI 持久化的登录态走纯 HTTP，并通过 lark-cli 用户身份写入飞书 Base。
+只处理用户有权访问的 Moka 和飞书数据。首次登录使用本机 CDP Chrome；定时采集使用 CLI 持久化的登录态，以纯 HTTP 依次切换校招、社招并合并结果，通过 lark-cli 用户身份写入飞书 Base。
 
 **凭证边界**：
 - Agent 层（对话回复、日志摘要、错误信息、临时文件名、脚本 stdout）**不得读取、复制、回显或持久化**任何 Cookie、JWT、access token、密码、验证码。
-- CLI 插件（`opencli moka`）**内部**为了支持默认模式定时任务在 Chrome 被关闭时也能采集，允许把 Moka 应用与 Passport 登录 cookie 明文落盘到 `~/.opencli/mokaData/moka-cookies.json`（仅当前 OS 用户账户可读）。应用 session 失效时，插件会用同一文件中的 Passport cookie 走 ticket + uniLogin 静默续期并写回新 cookie；全程无需 CDP。该文件由 CLI 内部读写，Agent 不得读取、cat、上传、转发或在对话/日志中回显该文件内容。
+- CLI 插件（`opencli moka`）**内部**为了支持定时任务在 Chrome 被关闭时也能采集，允许把 Moka 应用与 Passport 登录 cookie 明文落盘到 `~/.opencli/mokaData/moka-cookies.json`（仅当前 OS 用户账户可读）。应用 session 失效时，插件会用同一文件中的 Passport cookie 走 ticket + uniLogin 静默续期并写回新 cookie；全程无需 CDP。该文件由 CLI 内部读写，Agent 不得读取、cat、上传、转发或在对话/日志中回显该文件内容。
 
 **执行工具边界**：
 - 依赖本机状态的命令必须用 `lobe-local-system/runCommand` 在用户电脑执行，包括 `opencli moka`、CDP/Chrome、`lark-cli`，以及本 skill 自带且需要访问 `~/.opencli` 配置或本地授权的 `.mjs` 脚本；这样才能使用本机 PATH、CLI、Cookie 文件和用户配置。Cookie 仍只能由 `opencli moka` 内部读取，Agent 不得把 Cookie 内容作为命令参数或传给其他执行器。
@@ -20,9 +20,8 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 
 根据请求选择且只执行一个入口：
 
-1. 用户要求"配置环境并登录"或同义表达：执行"首次配置入口"。
-2. 请求内容为或明确表达"定时任务，调用moka-transcript skill，抓取今日默认模式转写。"：执行"定时采集入口 · 默认模式"。
-3. 请求内容为或明确表达"定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。"：执行"定时采集入口 · 全模式"。
+1. 用户要求配置、检查环境、登录、更新离线采集材料，或在进行中的首次配置里回复「登录好了」：执行「首次配置入口」，从上次暂停处继续。
+2. 定时任务明确调用 `moka-transcriptV2` 抓取今日全部面试转写：执行「定时采集入口」。只调用一次全量导出；不向用户询问、也不在提示词中指定招聘模式。
 
 ## 固定配置
 
@@ -34,14 +33,13 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 - macOS/Linux 实际路径：`$HOME/.opencli/mokaData/transcript.json`
 - CLI 内部 Moka cookie 缓存：`~/.opencli/mokaData/moka-cookies.json`（仅 CLI 读写，Agent 不得读取）
 - CLI 内部 interviewList 请求体模板缓存：`~/.opencli/mokaData/moka-interview-list-payload.json`
-- 定时任务名称（默认模式）：`Moka转写抓取-默认模式`
-- 定时任务指令（默认模式）：`定时任务，调用moka-transcript skill，抓取今日默认模式转写。`
-- 定时任务名称（全模式）：`Moka转写抓取-全模式`
-- 定时任务指令（全模式）：`定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。`
+- 定时任务名称：`Moka面试转写与复盘`
+- 定时任务指令：`定时任务，调用 moka-transcriptV2 skill，抓取今日全部面试转写，生成复盘报告并回填飞书。`
+- 已有定时任务若仍引用旧 Skill 名或旧提示词，须在普通配置入口更新为上述指令；改名不会自动迁移宿主定时任务。
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`当前助手自身`
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
-- 飞书同步脚本：`scripts/sync-lark-base.mjs`（内置 Windows 命令行长度保护：JSON > 3000 字符时自动切换为 `@./file.json` 临时文件模式）
+- 飞书同步脚本：`scripts/sync-lark-base.mjs`（Windows 上所有 JSON 均用 `@./file.json` 临时文件传参；其他平台超过 3000 字符时切换）
 - 已通知预筛脚本：`scripts/filter-notified-records.mjs`（只读 Base；在评分前按「申请ID + 面试ID」过滤 `是否已通知=是` 的记录）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 人员字段回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行；面试官从每行「面试官」text 解析，面试安排 HR 从本次 JSON 顶层 `面试安排HR` 解析并按联合键限定本次记录；两者分别写入对应 user 列。**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
@@ -53,16 +51,15 @@ description: 为 HR 配置并运行 Moka 面试转写采集并写入飞书多维
 
 ## 首次配置入口
 
-**⚠️ 交互原则:选择尽量一次性收齐,不要一步问一次。** 首次配置涉及 4 个用户选择:
+**⚠️ 交互原则:选择尽量一次性收齐,不要一步问一次。** 首次配置涉及 3 个用户选择:
 1. 飞书 Base URL 来源(使用已有 config / 新建 / 手动指定)
 2. Moka 登录态处理(本地有 cookie 时:继续用 / 重新登录;本地无 cookie 时:无选项,必须重新登录)
-3. 采集模式(默认模式 / 全模式)
-4. 是否创建定时任务(是 / 否,若是则问执行时机)
+3. 是否创建定时任务(是 / 否,若是则问执行时机)
 
 **执行顺序**:
-- 第 1、3、4 项**可以合并成一次多问选项框**,在 lark-cli 授权通过后一并向用户提问,一次拿齐再往下走。第 2 项**必须先做磁盘 cookie 存在性探测**才能决定要不要给选项(本地无 cookie 时没有选项可选),所以放在探测之后紧接着单独问——不能提前混进"一次性选项框",否则用户看到的"继续用"选项在本地无 cookie 时是无效的。
+- 第 1、3 项**可以合并成一次多问选项框**,在 lark-cli 授权通过后一并向用户提问,一次拿齐再往下走。第 2 项**必须先做磁盘 cookie 存在性探测**才能决定要不要给选项(本地无 cookie 时没有选项可选),所以放在探测之后紧接着单独问——不能提前混进"一次性选项框",否则用户看到的"继续用"选项在本地无 cookie 时是无效的。
 - 若宿主的选项框工具不支持一次收多个问题,退化为顺序问,但**每个问题的选项要一次给全**,不要中途插入其他步骤打断用户。
-- **本 Skill 只负责 Moka 相关配置**——lark-cli 的授权二维码、系统软件的安装审批等属于其他子步骤的必要交互,该问还要问,不合并进上述 4 选项。
+- **本 Skill 只负责 Moka 相关配置**——lark-cli 的授权二维码、系统软件的安装审批等属于其他子步骤的必要交互,该问还要问,不合并进上述 3 个选项。
 
 ### 1. 探测并补齐环境
 
@@ -103,7 +100,7 @@ OpenCLI 主程序处理规则：
 - 未安装时才执行安装：
 
 ```text
-npm install -g @jackwener/opencli@latest
+npm install -g @jackwener/opencli@1.8.6
 ```
 
 - 已安装、版本满足 `>=1.8.6 <2` 且上述命令可以正常运行时，**保留当前版本，不执行 `npm update`，也不为了更新 Moka 插件而升级 OpenCLI**。
@@ -138,7 +135,7 @@ opencli plugin install github:NeverlandzZ1/Moka-cli
 
 6. 若 `source.kind` 为 `local`，说明这是开发者本地源码绑定：读取 `source.path` 对应 Git 仓库的当前 `HEAD`，与 GitHub 远端 `HEAD` 比较。完全一致时可继续；不一致或工作区存在未提交改动时，**不得自动 pull、reset、卸载或覆盖本地源码**，应说明这是本地开发版本并让用户先处理或明确选择改装 GitHub 版。
 
-7. commit 一致后，再执行 `opencli moka export-transcripts --help`，确认至少存在 `--offline`、`--output` 和 `--overwrite`。任一缺失都视为插件注册仍旧，按上面的“一次重装”规则处理。
+7. commit 一致后，执行 `opencli moka capture-payload --help` 与 `opencli moka export-transcripts --help`；确认前者已注册，后者至少包含 `--offline`、`--output`、`--overwrite`。任一缺失都视为插件注册仍旧，按上面的“一次重装”规则处理。
 
 该强制更新检查**只属于普通对话的首次配置/环境检测入口**。定时采集入口不得联网检查 GitHub、不得执行插件更新或重装；若导出结果缺少新版必需的顶层 `面试安排HR`，定时任务应中断并要求用户回到普通配置入口更新插件。
 
@@ -155,6 +152,7 @@ lark-cli 已存在时使用 `lark-cli update` 更新，不要用不明来源的�
 ```text
 opencli plugin list -f json
 opencli moka login --help
+opencli moka capture-payload --help
 opencli moka export-transcripts --help
 lark-cli --version
 lark-cli doctor
@@ -209,61 +207,58 @@ lark-cli 授权通过后,用**选项框**让用户明确选择本次要用哪个
 
 **⚠️ 定时采集入口不会再问这个选项**——定时任务直接读 `~/.opencli/moka-config.json` 里的 `feishu_base_url`,不弹选项框、不再交互(无人值守场景没法交互)。要换写入目标只能来首次配置入口重新走这一步。
 
-### 4. 确保本地 Moka 登录态存在且有效
+### 4. 确保本地 Moka 离线采集材料就绪
 
-**本步骤对登录态只做一个安全判断：**本地磁盘是否有 Moka cookie 文件（`~/.opencli/mokaData/moka-cookies.json`,由 CLI 内部维护,Agent 只探存在性、不读文件内容)。**它和 CDP Chrome 是不是活着完全无关**——即使 Chrome 完全关闭,只要磁盘 cookie 文件存在,`--offline` 就会先尝试现有应用 session，失效时再自动使用 Passport cookie 静默续期；CDP 只是首次登录和全模式切换校招/社招时需要。所以本步骤只判断"cookie 文件在不在",CDP 的状态不参与决策。
+离线采集需要两个本地文件：CLI 管理的 Cookie 文件 `~/.opencli/mokaData/moka-cookies.json`，以及 interviewList 请求体模板 `~/.opencli/mokaData/moka-interview-list-payload.json`。Agent 只探测二者是否存在，不得读取内容。两个文件存在仅表示材料齐备；登录态和请求体是否仍可用，由实际 `--offline` 请求验证。CDP 用于首次登录、主动重新登录或重新捕获 payload。
 
-**⚠️ 不要用 `opencli moka status` 来判断"本地是否有登录态"**——那条命令是探 CDP 连接和 Moka 页面可达性的,反映的是"CDP 活着且能访问 Moka",和"磁盘上 cookie 文件在不在"是两回事(即使 CDP 没连,只要磁盘 cookie 在,`--offline` 采集依然能跑)。本步骤专门用文件系统的存在性探测。
+**⚠️ 不要用 `opencli moka status` 来判断"离线采集是否就绪"**——那条命令只反映 CDP 是否活着且能访问 Moka，不证明磁盘上的 Cookie 与 payload 两个文件都存在。本步骤专门用文件系统的存在性探测；重新准备时使用 `capture-payload`。
 
-**第一步：对 cookie 文件做只读存在性探测**
+**第一步：对两个文件做只读存在性探测**
 
 只探存在性、不读文件内容、不 echo 路径或结果到对话/日志(红线 #1)。跨平台命令：
 
-- Windows PowerShell：`Test-Path "$env:USERPROFILE\.opencli\mokaData\moka-cookies.json"`
-- macOS / Linux / Git Bash：`test -f "$HOME/.opencli/mokaData/moka-cookies.json" && echo yes || echo no`
+- Windows PowerShell：分别执行 `Test-Path "$env:USERPROFILE\.opencli\mokaData\moka-cookies.json"` 与 `Test-Path "$env:USERPROFILE\.opencli\mokaData\moka-interview-list-payload.json"`
+- macOS / Linux / Git Bash：分别执行 `test -f "$HOME/.opencli/mokaData/moka-cookies.json"` 与 `test -f "$HOME/.opencli/mokaData/moka-interview-list-payload.json"`
 
 只取"存在 / 不存在"这一个布尔结果进入分支判断,**绝不 cat、Read、打印文件内容**。
 
 **第二步：按存在性结果分支处理**
 
-- **本地有 cookie 文件**(不论文件里的 cookie 是否已过期)：**不要**擅自跳过,也**不要**擅自拉 Chrome,用**选项框**让用户拍板:
+- **Cookie 与 payload 文件都存在**：**不要**擅自跳过,也**不要**擅自拉 Chrome,用**选项框**让用户拍板:
 
   | 选项 | 后续行为 |
   |------|---------|
-  | ✅ 使用现有登录态,跳过 CDP 登录（推荐） | 不打开 CDP Chrome,直接进入下一步选择采集模式；默认模式会在需要时自动用 Passport cookie 静默续期，选全模式时到那一步再单独拉 CDP |
+  | ✅ 使用现有登录态,跳过 CDP 登录（推荐） | 不打开 CDP Chrome,直接进入下一步；定时采集会在需要时自动用 Passport cookie 静默续期，取得今日全量数据 |
   | 🔄 重新登录（换账号或强制刷新） | 走下面的"强制登录流程"(cookie 已过期时也走这条) |
 
-  cookie 是否仍能续期,由后面的真实采集验证：应用 session 失效不算失败，CLI 会先自动走 Passport ticket + uniLogin；只有 Passport 也失效、被服务端撤销或文件不完整时，才让用户手动回来走强制登录。本步不读取 cookie 内容做预判，遵守红线 #1。
+  Cookie 是否仍能续期,由后面的真实采集验证：应用 session 失效不算失败，CLI 会先自动走 Passport ticket + uniLogin；只有 Passport 也失效、被服务端撤销或文件不完整时，才让用户手动回来走强制登录。本步不读取文件内容做预判，遵守红线 #1。
 
-- **本地无 cookie 文件**(首次配置,从未登录过)：**没有可选项**,必须走强制登录流程——唯一出路就是拉起 CDP 让用户扫码登录,不给"跳过"选项。
+- **Cookie 存在但 payload 缺失**：不能直接进入定时任务。执行下面的准备流程；若 `opencli moka login` 复用的 Chrome 已登录，可直接运行捕获命令，无需用户再次登录。
+- **本地无 Cookie 文件**(首次配置,从未登录过)：**没有可选项**,必须走下面的准备流程——唯一出路就是拉起 CDP 让用户登录,不给"跳过"选项。
 
-**强制登录流程**（仅在"本地无 cookie 文件",或用户在"本地有"分支主动选择重新登录时执行）：
+**登录并准备离线采集流程**（本地缺 Cookie、缺 payload，或用户主动选择重新登录时执行）：
 
 ```text
 opencli moka login -f json
 ```
 
-该命令打开使用独立用户数据目录的 CDP Chrome 并进入 Moka。告诉用户在这个窗口中完成登录，然后回复"登录好了"。到这里必须暂停并等待用户回复；不要索要账号、密码、验证码或 Cookie，也不要替用户登录。
+该命令打开或复用独立用户数据目录的 CDP Chrome 并进入 Moka。若返回尚未登录，告诉用户在这个窗口中完成登录，然后回复"登录好了"；到这里必须暂停并等待用户回复，不要索要账号、密码、验证码或 Cookie，也不要替用户登录。若返回已登录，可直接继续。
 
-用户回复完成后再对 cookie 文件做一次存在性探测(方法同第一步)确认已落盘。**必须**在本步骤退出前拿到一次"存在"结果,不能带着空目录进入下一步。
+确认页面已登录后，在 Chrome 仍开启时执行：
 
-登录完成后 cookie 已落盘到 CLI 的 user data 目录。此时 Chrome 可以继续开着（后面选全模式时正好复用），也可以关掉（后面选默认模式时不需要，磁盘 cookie 仍然在）——不要在本步骤主动关闭 Chrome，交给下一步根据采集模式决定。
+```text
+opencli moka capture-payload -f json
+```
 
-### 5. 选择采集模式并（可选）创建定时任务
+登录时若使用了非默认 CDP `--port`，这里也传同一个端口。
 
-本地登录态确认有效后，先问采集模式：
+用户回复「登录好了」后，立即在同一 CDP 端口执行上述 `capture-payload`；不能以 `status`、Cookie 文件存在或一次普通导出代替验证。命令会在需要时以 CDP 原生鼠标点击侧栏「面试安排」进入总览，再点击「加载更多」捕获 `interviewList`；不得手动执行 `Page.reload` 或 `page.goto`。命令落盘最新 payload、保存 Cookie，并通过 `getCurrent` 验证当前 HR；不得把 payload 或 Cookie 正文输出到对话。只有退出码为 0，且返回 `offlineReady: true`、`payloadSaved: true`、`currentUserName` 非空，再只读确认两个文件存在，才告诉用户可以关闭 Chrome。捕获失败时保留 Chrome，说明错误并检查总览权限或重新运行捕获；不得宣称离线材料已就绪。
 
-| 选项 | 说明 | 对 CDP 的要求 |
-|------|------|---------------|
-| 默认模式（推荐日常使用） | 只抓取当前 Moka 账号默认模式下的转写数据，采集期间**不需要 CDP 常驻**，Chrome 可完全关闭 | 采集时无需 Chrome 运行；靠磁盘 cookie 直接走 HTTP |
-| 全模式（校招 + 社招） | 依次切换到校招模式和社招模式各导出一次，覆盖两类岗位 | 采集时**必须 CDP 常驻**——模式切换需要通过 DOM 点击完成 |
+### 5. （可选）创建定时任务
 
-用户选择后：
+本地离线材料确认后，定时任务使用 `export-transcripts --offline` 一次取得今日全部面试转写；不提供采集模式选项。
 
-- **选默认模式**：告知用户 Chrome 可以关闭（保留 user data 目录即可），随后进入下一步询问是否创建定时任务。
-- **选全模式**：告知用户不能关闭当前 CDP Chrome，需要在后续定时任务运行期间保持 Chrome 进程存活；若 HR 关闭了它，全模式定时任务运行时会中断并提示。
-
-无论选哪种模式，都问一次："是否创建对应的定时任务？"
+问一次：「是否创建每日面试转写与复盘定时任务？」
 
 - 用户选择否：简洁确认环境和登录已配置，结束。
 - 用户选择是：再单独询问执行时机。接受"每隔 N 小时""每天 HH:mm""工作日每天 HH:mm"等自然语言。
@@ -276,23 +271,9 @@ opencli moka login -f json
 
 若用户表达无法无歧义映射为 Cron，先澄清，不要猜测。创建前向用户复述时间和 Cron。
 
-根据步骤开头的采集模式选择对应字段：
-
-**默认模式**：
-
 ```text
-任务名称：Moka转写抓取-默认模式
-任务指令：定时任务，调用moka-transcript skill，抓取今日默认模式转写。
-Cron：<根据用户执行时机生成>
-时区：Asia/Shanghai
-执行 Agent：当前助手自身
-```
-
-**全模式**：
-
-```text
-任务名称：Moka转写抓取-全模式
-任务指令：定时任务，调用moka-transcript skill，抓取今日社招和校招所有转写。
+任务名称：Moka面试转写与复盘
+任务指令：定时任务，调用 moka-transcriptV2 skill，抓取今日全部面试转写，生成复盘报告并回填飞书。
 Cron：<根据用户执行时机生成>
 时区：Asia/Shanghai
 执行 Agent：当前助手自身
@@ -300,21 +281,23 @@ Cron：<根据用户执行时机生成>
 
 使用宿主 Agent 的定时任务/自动化创建能力创建任务。只有工具明确返回创建成功后才能汇报成功；若当前宿主没有定时任务能力，明确说明无法创建，不要伪造结果。
 
-若用户选择全模式且创建了定时任务，在最终汇报中额外提醒："全模式定时任务运行期间 CDP Chrome 必须保持开启，否则任务会中断"。
+## 定时采集入口
 
-## 定时采集入口 · 默认模式
+该入口面向无人值守运行。**不检测 CDP、不主动读取或检查 Moka cookie 内容、不检查 lark-cli 授权**。调用一次 `opencli moka export-transcripts --offline` 获取今日全量 JSON；CLI 在真实请求中验证应用 session、必要时通过 Passport 静默续期，并完成内部采集与合并。**飞书 Base URL 直接从 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段读取，不弹选项框、不问用户。** 自动续期、飞书写入或配置失败时按对应阶段中断并汇报，让 HR 回普通配置入口处理。
 
-该入口面向无人值守运行，只抓取当前 Moka 账号默认模式下的转写数据。**不检测 CDP、不主动读取或检查 Moka cookie 内容、不检查 lark-cli 授权**——`opencli moka` 会在真实请求中验证应用 session，并在需要时自动通过 Passport 静默续期。**飞书 Base URL 直接从 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段读取,不弹选项框、不问用户——无人值守场景无法交互;要换写入目标必须回首次配置入口重新走。** 只有自动续期也失败、写入报授权失败或 config 里 `feishu_base_url` 缺失等异常才中断并汇报，让 HR 回到首次配置入口处理。
+**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup 等脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
+
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，两类人员字段由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成并上传到固定飞书云盘目录，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
 
 ### 1. 覆盖导出今日全量 JSON
 
-解析默认 JSON 的绝对路径，执行：
+解析默认 JSON 的绝对路径，执行一次：
 
 ```text
 opencli moka export-transcripts --offline --output "<绝对输出路径>" --overwrite -f json
 ```
 
-`--offline` 跳过 CDP Chrome，直接用磁盘上的 Moka cookie 发 HTTP 请求，Chrome 关闭也能采集。若应用 session 已失效，CLI 会自动使用同一文件里的 Passport cookie 获取 ticket、调用 uniLogin、写回新 session 并重试原请求。`--overwrite` 覆盖旧文件，得到今天默认模式的全量 JSON。
+`--offline` 跳过 CDP Chrome，读取本地 Cookie 和请求体模板发 HTTP 请求。CLI 只调用一次当前账号接口取得顶层 `面试安排HR`，内部依次采集两类招聘数据，再按 `applicationId + interviewId` 合并去重并重算统计；重复联合键以较后采集的记录为准。应用 session 失效时会尝试 Passport ticket + uniLogin 续期并写回新 session。`--overwrite` 使输出文件只包含本次今日全量结果。Agent 不另行调用 `mode`、`applications`、`interviews` 或 `transcript` 拼接采集结果。
 
 导出成功后，确认 JSON 顶层存在非空的 `面试安排HR`，其值由 CLI 从当前 Moka 登录账号的 `getCurrent` 接口取得。缺失或为空说明插件版本过旧或身份接口异常，应中断并要求更新插件后重新导出；不得从面试官姓名、逐字稿或飞书登录用户猜测负责 HR。
 
@@ -322,67 +305,11 @@ opencli moka export-transcripts --offline --output "<绝对输出路径>" --over
 
 ### 2. 共用后处理
 
-导出成功后，走 [`## 共用后处理`](#共用后处理) 的七段流程（已通知预筛 + 原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时**只汇报默认模式一份导出结果**，不区分校招/社招。
-
-## 定时采集入口 · 全模式
-
-该入口面向无人值守运行，依次抓取校招和社招两类岗位的转写数据。**依赖 CDP Chrome 常驻**——切换校招/社招模式必须通过 DOM 点击完成。不检查 lark-cli 授权和 Moka 登录态本身（首次配置入口已保证），但**必须检测 CDP 是否连接**——CDP 断开时直接中断。**飞书 Base URL 直接从 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段读取,不弹选项框、不问用户——无人值守场景无法交互;要换写入目标必须回首次配置入口重新走。**
-
-### 1. 检测 CDP 是否可用
-
-执行：
-
-```text
-opencli moka status -f json
-```
-
-- 输出包含 `mokaLogin: authenticated` 且 CDP 已连接：继续。
-- CDP 未连接或 Chrome 已被关闭：**中断本次采集**，汇报"全模式定时任务需要 CDP Chrome 常驻，当前 Chrome 未运行；请 HR 重新执行 `opencli moka login` 拉起 CDP 后再等待下次触发"。**不要**在定时任务里尝试自动 `opencli moka login`——那会弹出 Chrome 窗口，无人值守场景下没有意义。
-- Moka 登录态失效：中断并汇报"Moka 登录态失效，需要 HR 回到首次配置入口重新登录"。
-
-lark-cli 授权失效的场景不在本步骤主动预检，交给 sync/dedup 脚本自然报错后中断。
-
-**lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup 等脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
-
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，两类人员字段由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成并上传到固定飞书云盘目录，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
-
-### 2. 校招：覆盖导出
-
-依次执行：
-
-```text
-opencli moka mode campus -f json
-opencli moka export-transcripts --output "<绝对输出路径>" --overwrite -f json
-```
-
-`opencli moka mode campus` 通过 CDP 执行 DOM 点击切换到校招模式——这是本入口需要 Chrome 常驻的唯一原因。若该命令报 CDP 断开或 DOM 元素找不到，中断并汇报。
-
-`--overwrite` 保证 JSON 只包含本次校招结果，覆盖昨天遗留内容。**本步骤不写飞书**——校招 JSON 先落在 `<绝对输出路径>` 中,等社招合并后再一次性同步。
-
-校招导出后确认 JSON 顶层 `面试安排HR` 非空；它必须来自 CLI 的当前 Moka 登录账号接口，不能从面试记录推断。
-
-### 3. 社招：合并导出到同一 JSON
-
-仅在校招导出成功后执行：
-
-```text
-opencli moka mode social -f json
-opencli moka export-transcripts --output "<同一绝对输出路径>" -f json
-```
-
-**注意此处不传 `--overwrite`**——`export-transcripts` 默认行为是增量合并：以 `applicationId + interviewId` 为联合键，新记录追加,重复联合键覆盖旧值,校招 records 保留。合并完成后 `<绝对输出路径>` 里 records 数 = 校招条数 + 社招条数（去重后）。
-
-社招合并完成后再次确认顶层 `面试安排HR` 非空，并以本次社招导出时的当前登录账号值为准。
-
-若社招导出失败，保留当前 JSON，报告失败,便于人工排查;不得声称全流程成功。
-
-### 4. 共用后处理
-
-校招+社招合并后的 JSON 就位后，走 [`## 共用后处理`](#共用后处理) 的七段流程（已通知预筛 + 原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。汇总时分别标注校招/社招导出条数、合并后总数。
+导出成功后，走 [`## 共用后处理`](#共用后处理) 的七段流程（已通知预筛 + 原版报告引擎 + 飞书云盘上传 + 单次 sync + 去重 + 人员回填）。CLI 只输出合并后的总统计，按合并后的总数汇报。
 
 ## 共用后处理
 
-两个定时入口在拿到「今天全量 JSON」后，共享以下七段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**，避免全模式重复写入。
+统一定时入口拿到「今日全量 JSON」后，执行以下七段流程。**只调一次 sync-lark-base.mjs、只调一次 deduplicate-lark-base.mjs**。
 
 ### 后处理-0. 已通知记录预筛（必须先执行）
 
@@ -399,7 +326,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 - 以脚本 stdout 的 `skippedAlreadyNotified` 作为本次预筛跳过数；`remainingRecords` 为后续唯一允许处理的 records 数。
 - `申请ID` 或 `面试ID` 缺失的 record 不匹配任何已通知记录，保留并按原流程处理。
 - Base 缺少任一所需字段、lark-cli 查询失败、或脚本输出 `ok !== true` 时，**立即中断本次定时任务**；不得跳过预筛、不得依赖后置 dedup 补救。
-- 预筛只在两个定时入口执行。普通配置入口不读取 Base 历史记录，也不调用本脚本。
+- 预筛只在定时采集入口执行。普通配置入口不读取 Base 历史记录，也不调用本脚本。
 
 ### 后处理-1. 调用原版 `interviewer-review` 生成并校验本地 HTML
 
@@ -431,7 +358,7 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 1. 通过 `interviewer-review` 的 `execScript` 对当前单个本地 `stats_<idx>.json` 运行 `node scripts/extract_evidence.cjs "<stats_<idx>.json>"`。使用输出的 `round`、`redline_policy`、`eligible_interviewer_turns`、`opening_interviewer_turns`、`closing_interviewer_turns`、`speakers`、`process_signals` 与 `redline_signals`。`redline_policy.enabled=false` 时本场为 HR面试：不分配 R 类证据，不扫描或生成红线。每次只处理一个 stats JSON；**不得**临时生成 `check-stats.cjs` 等辅助脚本，也不得改用本地 `runCommand` 调用某个仓库副本。
 2. 从这些轮次中选出 **每个轮次只能分配给一个 claim_id** 的证据池。规划时满足：
    - 每个亮点（H1-H5）分到 2-3 个不重复的面试官轮次，每个 `chars ≥ 40`（避免"你好""拜拜"等极短轮次）。
-   - 每个改进项（I1-I5）分到 2-3 个不重复的面试官轮次（`single_event:true` 的可以只给1个）。
+   - 每个普通改进项分到 2-3 个不重复的轮次（`single_event:true` 的可以只给1个）；`dialogue_chain` 必须包含局部相邻的面试官→候选人→面试官三轮。`process_signal` 必须引用信号指定的空档前后两轮，即使边界是候选人短句也必须保留原文；短句不得被通用长度门槛排除。
    - 仅 `redline_policy.enabled=true` 时，红线证据（R1-R2）分到 1-2 个轮次；HR面试不分配 R 类证据。
    - **所有 claim_id 的证据 turn_index 全局不重复**——同一个 turn_index 不能出现在两个 claim_id 里。
 3. 如果面试官轮次不够分配（如面试官说话太少、太短），说明这场面试官行为证据不足，应降低亮点数量到 3 条、改进项数量到 3 条，或降低雷达分数（避免 ≥3.5 维度需要对应亮点）。**不得复用同一个 turn_index 凑数**。
@@ -446,16 +373,16 @@ node "<Skill目录>/scripts/filter-notified-records.mjs" --input "<绝对输出�
 
 - [ ] **通读逐字稿已完成**——不是只看统计摘要的首尾5轮，是完整读了一遍。
 - [ ] **证据预分配已完成**——每个 claim_id 的 turn_index 在写之前就规划好，全局不重复。
-- [ ] **所有 turn_index 属于面试官**——每个 evidence_turn_indices 里的 turn_index 对应的 `stats.turns[].who` 在 `stats.roles` 里是 `interviewer`，不是 `candidate`。**这是最高频错误，写之前必须逐个核对。**
+- [ ] **逐个核对 turn_index 的角色**——普通面试官行为证据属于 `stats.roles` 中的 `interviewer`；`dialogue_chain` 必须含候选人回答，`process_signal` 的前后边界也可能含候选人轮次，按原始信号引用。
 - [ ] **每个亮点 2-3 段证据**，每段 `chars ≥ 40`——避免"你好""拜拜""清蒸""在上海，"等极短轮次。
-- [ ] **每个改进项 2-3 段证据**（`single_event:true` 的可1段），每段同样 `chars ≥ 40`。
+- [ ] **每个普通改进项 2-3 段证据**（`single_event:true` 的可1段）；`process_signal` 前后边界原话允许短于通用门槛，但必须非空、真实、不可改写；`dialogue_chain` 按三轮问答链约束。
 - [ ] **所有 turn_index 全局不重复**——一个 turn_index 只能出现在一个 claim_id 里。亮点和改进项不能共用同一段原话。
 - [ ] **雷达 ≥3.5 的维度都有对应 highlight**——如果打了提问质量 4.0，必须有 dimension="提问质量" 的亮点条目。
 - [ ] **雷达低分的维度都有对应 improvement**——如果倾听打了 2.0，必须有 dimension="倾听" 的改进项条目。
 - [ ] **倾听占比 KPI 校验**：只有 `stats.speakers` 里**单个面试官**的 `share_pct > 30` 或候选人 `share_pct < 70` 时，才能写 `evidence_basis="quantitative_pattern"` 的倾听改进项。**多面试官场景**：校验器从 stats.json 取的是 `--interviewer` 参数传入的那个说话人的 `share_pct`，不是合计值——**不要手算合计占比写进 summary**。使用 `extract_evidence.cjs` 输出的 `speakers` 核对实际 share_pct，不再另起 `node -e` 或临时脚本。
 - [ ] **不写"最佳听众"称号当面试官占比 >30%**。
 - [ ] **claim 和 summary 文本不含隐式触发词**——校验器用正则匹配 claim+summary 文本强制 evidence_basis 类型（见下表），写之前确认你的 claim 措辞和 evidence_basis 类型一致。
-- [ ] **process_signals 已处理**——如果 stats.json 输出了 `process_signals`（如会前长空档），必须在「开场与流程」改进项中引用空档前后的 `before_turn_index` 和 `after_turn_index`。
+- [ ] **process_signals 已处理**——如果 stats.json 输出了 `process_signals`（如会前长空档），必须在同一条「开场与流程」且 `evidence_basis="process_signal"` 的改进项中引用空档前后的 `before_turn_index` 和 `after_turn_index`，边界原话可短但不可省略。
 - [ ] **badge_line 去掉 `<em>` 标签后 20-35 字**（标点也算字数）。
 - [ ] **红线策略已执行**——`redline_policy.enabled=true` 时逐条处理 redline_signals；`enabled=false` 时 `redlines=[]`、`dismissed_redline_signals=[]`、无 R 类证据、无「本场请注意」称号和红线区块。HR面试若低于正职 20 分钟/实习 15 分钟，必须写为「开场与流程」普通改进项，`evidence_basis="duration_boundary"`，引用面试官首尾轮次，KPI 显示黄色「偏短」。
 - [ ] **advice 恰好 4 条**。
@@ -598,7 +525,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 
 最后汇报:
 
-- 校招、社招分别是否导出成功、合并后总条数(默认模式入口只汇报默认模式一份)，以及因「是否已通知=是」预筛跳过数
+- 今日全量导出是否成功、合并后总条数，以及因「是否已通知=是」预筛跳过数
 - 本次评分成功/失败/跳过的记录数，HTML Drive 上传成功/失败数
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
@@ -617,7 +544,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 
 1. 解析本 skill 与 `interviewer-review` 的绝对目录，确认后者的原版 `SKILL.md`、统计、渲染、校验和模板均存在。
 2. 定位 lark-cli；Windows 上设 `chcp 65001` 与 `PYTHONIOENCODING=utf-8`。
-3. 默认模式执行 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`；全模式依次 CDP 自检、校招覆盖、社招合并，期间不写飞书。导出后确认 JSON 顶层 `面试安排HR` 非空。
+3. 执行一次 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`，取得今日全量 JSON。导出后确认顶层 `面试安排HR` 非空。
 4. 先运行 `filter-notified-records.mjs`，仅保留 Base 中不存在相同「申请ID + 面试ID」且「是否已通知=是」历史行的 records；预筛失败立即中断。
 5. 遍历预筛后的 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
 6. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
@@ -697,7 +624,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 
 进入任一定时入口前,**必须**在心里过一遍下面这份清单;违背任何一条基本都会踩坑:
 
-- [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。**注意 moka-transcript 和 interviewer-review 是两个不同的 skill 目录**,各自的 `.mjs`/`.py` 用各自目录的绝对路径。
+- [ ] Skill 绝对路径已解析,后续 `.mjs` 全部用绝对路径调用。**注意 moka-transcriptV2 和 interviewer-review 是两个不同的 skill 目录**,各自的 `.mjs`/`.py` 用各自目录的绝对路径。
 - [ ] lark-cli 绝对路径已解析,所有 `.mjs` 都追加 `--lark-cli "<绝对路径>"`。
 - [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
 - [ ] 导出 JSON 顶层 `面试安排HR` 非空，且报告处理后仍原样保留；不得从面试官或逐字稿推断该值。
@@ -712,9 +639,9 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 - [ ] **每条记录必须通读逐字稿后再写 analysis.json**——不是只看统计摘要的首尾5轮。这是强制前置步骤,不可省略,不可因为串行处理就跳过。
 - [ ] **写 analysis.json 前先做证据预分配**——从 stats.json 提取所有面试官轮次(chars≥40),规划每个 claim_id 用哪些 turn_index,全局不重复。不要先写后修。
 - [ ] **analysis.json 事前自检清单**（写完后、调 render_report.py 之前逐条确认）：
-  - 所有 evidence_turn_indices 的 turn_index 属于面试官(不是候选人)
+  - 普通面试官行为证据属于面试官；`dialogue_chain` 包含候选人回答，`process_signal` 按信号引用前后边界
   - 每个亮点 2-3 段证据,每段 chars≥40
-  - 每个改进项 2-3 段证据(single_event 的可1段),每段 chars≥40
+  - 普通改进项默认 2-3 段证据；`single_event` 可1段，`process_signal` 的真实边界短句允许低于长度门槛
   - 所有 turn_index 全局不重复(跨 claim_id 不复用)
   - 雷达≥3.5 的维度有对应 highlight;低分维度有对应 improvement
   - 倾听占比改进项只在面试官单人 share_pct>30 时写,多面试官不要手算合计
@@ -726,7 +653,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 - [ ] **--interviewer 参数传的是 stats.json speakers 的 key**(转录 speaker 标签),不是 Moka 展示名。多面试官可重复传。
 - [ ] stats 证据摘要只用 `interviewer-review/scripts/extract_evidence.cjs`，每次一个本地 stats JSON，通过该 skill 的 `execScript` 调用；不临时生成 `.cjs`，不用本地 `runCommand` 指向仓库副本，也不用 `node -e` / `python -c`。
 - [ ] sync 判成功用 `ok:true && created===deduplicatedRecords && failed===0`,不是只看 `ok`。
-- [ ] 单次流水线**只调一次** sync-lark-base.mjs,不为校招/社招各调一次。
+- [ ] 单次流水线只导出一次，**只调一次** sync-lark-base.mjs 和 deduplicate-lark-base.mjs。
 - [ ] backfill-interviewer-user.mjs 在 dedup 之后执行且必须传 `--input <本次JSON>`；面试官从行内文本解析，面试安排 HR 从 JSON 顶层解析并只匹配本次联合键。失败/未解析姓名不阻塞汇报,把两类摘要附到汇总即可。
 - [ ] 出现任何写入失败**不重跑整个流水线**——把 `errors` 附到汇总,让 HR 决定。
 - [ ] **批量报告生成策略**：子代理只承担"读逐字稿→分析→写 analysis.json"，渲染和校验由自己串行跑。子代理返回后必须检查 analysis.json 完整性，空结果则自行接管，不停顿。**子代理不可用时由本 Agent 串行处理,不得降低质量标准。**

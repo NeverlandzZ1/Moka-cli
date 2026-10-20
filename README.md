@@ -35,7 +35,7 @@ git --version
 Windows PowerShell 或 macOS Terminal 均可执行：
 
 ```text
-npm install -g @jackwener/opencli@latest
+npm install -g @jackwener/opencli@1.8.6
 ```
 
 确认安装成功：
@@ -65,13 +65,17 @@ opencli moka login -f json
 
 命令会打开一个专用 Chrome 窗口。请在该窗口中自行登录 Moka，不要关闭窗口。
 
-登录完成后可以检查状态：
+登录完成后，在线捕获后续离线导出所需的请求体：
+
+```text
+opencli moka capture-payload -f json
+```
+
+命令会在需要时以 CDP 鼠标点击 Moka 侧栏的“面试安排”进入总览，再点击“加载更多”捕获请求；不会强制刷新页面。退出码为 0，且返回 `offlineReady: true`、`payloadSaved: true`、非空 `currentUserName` 后，Cookie、payload 和当前 HR 用户均已验证，可以关闭专用 Chrome。也可以随时单独检查在线状态：
 
 ```text
 opencli moka status -f json
 ```
-
-看到下面的状态即可开始导出：
 
 ```json
 {
@@ -79,7 +83,7 @@ opencli moka status -f json
 }
 ```
 
-### 切换校招或社招
+### 手动切换校招或社招
 
 导出前可以切换 Moka 当前的招聘模式：
 
@@ -88,7 +92,7 @@ opencli moka mode campus -f json   # 校招
 opencli moka mode social -f json   # 社招
 ```
 
-也可以直接使用 `校招` 或 `社招`。切换成功后，命令会间隔短暂时间刷新当前 Moka 页面两次，使界面和后续导出同时进入对应模式；导出命令会读取该模式下的今日面试。
+也可以直接使用 `校招` 或 `社招`。该命令只用于手动调整当前网页模式；`export-transcripts` 不依赖它，会在一次执行中通过 HTTP 自动抓取校招和社招并合并结果。
 
 ## 日常使用
 
@@ -113,10 +117,10 @@ opencli moka export-transcripts \
 工具会：
 
 1. 读取当前 Moka 登录账号的 HR 展示姓名。
-2. 找到北京时间今天的全部面试候选人。
-3. 获取这些候选人在当前应聘记录下的全部面试。
-4. 获取每场面试的面试官和逐字稿。
-5. 将结果写入指定 JSON 文件，并在 JSON 顶层写入 `面试安排HR`。
+2. 通过 HTTP 切换到校招，抓取北京时间今天的校招面试。
+3. 通过 HTTP 切换到社招，抓取北京时间今天的社招面试。
+4. 按 `applicationId + interviewId` 合并去重两类数据并重新计算统计。
+5. 将结果写入指定 JSON 文件，并在 JSON 顶层只写一次 `面试安排HR`。
 
 今天没有面试时，`records` 可以为空。
 
@@ -148,7 +152,7 @@ opencli moka export-transcripts `
 
 ## 无 CDP 采集(Chrome 已关闭时)
 
-只要曾经用 `opencli moka login` 成功登录并跑过一次 `export-transcripts`,后续采集就可以关闭 Chrome、加 `--offline` 跑纯 HTTP:
+只要曾经用 `opencli moka login` 成功登录并执行一次 `capture-payload`，后续采集就可以关闭 Chrome、加 `--offline` 跑纯 HTTP：
 
 ```powershell
 opencli moka export-transcripts --offline `
@@ -156,18 +160,9 @@ opencli moka export-transcripts --offline `
   -f json
 ```
 
-`--offline` 会读取 `~/.opencli/mokaData/moka-cookies.json` 里缓存的登录态直接发 HTTP,不再拉起 Chrome。适用于定时任务无人值守场景。
+`--offline` 会读取 `~/.opencli/mokaData/moka-cookies.json` 中的登录态和 `~/.opencli/mokaData/moka-interview-list-payload.json` 中的请求体模板，直接发 HTTP 请求，不再拉起 Chrome。命令内部会完成两类招聘数据的采集与合并；整个过程不需要 CDP。适用于定时任务无人值守场景。
 
 如果 Moka 应用侧的短期 session 已失效，插件会自动使用同一文件中的 Passport cookie 换取一次性 ticket，静默登录并把新 session 写回原 cookie 文件，然后重试原请求。这个续期过程同样不连接 CDP。手动更换登录态时必须替换完整的 `moka-cookies.json`，不能只复制 `app.mokahr.com` 下的几个 cookie，否则缺少 Passport 登录态就无法静默续期。
-
-只有全模式(需要切换校招/社招)必须带 CDP,不能加 `--offline`:
-
-```powershell
-opencli moka mode campus -f json
-opencli moka export-transcripts --output "..." --overwrite -f json
-opencli moka mode social -f json
-opencli moka export-transcripts --output "..." -f json
-```
 
 只有当 Passport 登录态本身也过期或被服务端撤销时，`--offline` 才会要求更换完整 cookie 文件或重新执行一次 `opencli moka login`。Passport 登录态仍有效时，普通应用 session 失效会自动恢复。
 
@@ -187,10 +182,10 @@ opencli plugin install github:NeverlandzZ1/Moka-cli
 opencli plugin list
 ```
 
-更新 OpenCLI 本身:
+仅当 OpenCLI 主程序缺失或不满足插件要求的 `>=1.8.6 <2` 时，安装兼容版本：
 
 ```text
-npm install -g @jackwener/opencli@latest
+npm install -g @jackwener/opencli@1.8.6
 ```
 
 ## 常见问题
@@ -205,7 +200,7 @@ opencli moka login -f json
 
 ### Moka 页面要求重新登录
 
-请在命令打开的专用 Chrome 中重新登录，然后再次执行导出命令。不要从浏览器开发者工具复制 Cookie 或 Token。
+请运行 `opencli moka login -f json`，在专用 Chrome 中重新登录，再运行 `opencli moka capture-payload -f json`。确认 `offlineReady: true` 后才关闭 Chrome 或运行 `export-transcripts --offline`。不要从浏览器开发者工具复制 Cookie 或 Token。
 
 ### 页面首次打开比较慢
 
@@ -247,4 +242,4 @@ questionAnalysis
 - 逐字稿包含候选人个人信息，请只保存到公司允许的位置。
 - 不要把导出的 JSON 上传到公开网盘或提交到 GitHub。
 
-开发、测试和发布说明见 [TESTING.md](TESTING.md)。接口字段说明见 [reference/moka-interview-apis.md](reference/moka-interview-apis.md)。
+开发、测试和发布说明见 [TESTING.md](TESTING.md)。接口字段说明见 [reference/moka-interview-apis.md](reference/moka-interview-apis.md)。配套定时工作流位于 [moka-transcriptV2 Skill](skills/moka-transcriptV2/SKILL.md)，打包产物为 `skills/moka-transcriptV2.zip`。

@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectTranscripts, mergeCollections, writeCollection } from '../src/collector.js';
+import {
+  collectAllModeTranscripts,
+  collectTranscripts,
+  combineModeCollections,
+  mergeCollections,
+  writeCollection,
+} from '../src/collector.js';
 import type { HttpClient } from '../src/http-client.js';
 import type { CollectionResult, TranscriptRecord } from '../src/types.js';
 
@@ -69,6 +75,107 @@ describe('collectTranscripts', () => {
       transcriptsAvailable: 1,
       transcriptsUnavailable: 0,
       errors: 0,
+    });
+  });
+});
+
+describe('collectAllModeTranscripts', () => {
+  it('gets the HR once, switches campus then social, and merges duplicate interviews', async () => {
+    let currentMode: 1 | 2 = 1;
+    const modeCalls: number[] = [];
+    let currentUserCalls = 0;
+    const client: HttpClient = {
+      fetchJson: async (url, options = {}) => {
+        if (url.endsWith('/getCurrent')) {
+          currentUserCalls += 1;
+          return { code: 0, data: { users: [{ userId: 1, name: '安排 HR' }] } };
+        }
+        if (url.endsWith('/update_currenthiremode_fields')) {
+          currentMode = (options.body as { currentHireMode: 1 | 2 }).currentHireMode;
+          modeCalls.push(currentMode);
+          return {};
+        }
+        if (url.endsWith('/interviewList')) {
+          const applicationId = currentMode === 2 ? 201 : 101;
+          return {
+            code: 0,
+            data: {
+              currentPage: 1,
+              pageSize: 10,
+              totalPage: 1,
+              rows: [{
+                applicationEntities: [
+                  { id: applicationId, name: `模式${currentMode}`, job: { title: '岗位' } },
+                  { id: 999, name: `重复${currentMode}`, job: { title: '公共岗位' } },
+                ],
+              }],
+            },
+          };
+        }
+        if (url.endsWith('/interviewCard')) {
+          const applicationId = Number((options.body as { applicationIds: string[] }).applicationIds[0]);
+          return {
+            code: 0,
+            data: [{
+              application: { id: applicationId, name: `候选人${applicationId}`, job: { title: '岗位' } },
+              entities: [{ id: applicationId * 10, roundName: '一面', interviewerFeedbacks: [] }],
+            }],
+          };
+        }
+        if (url.endsWith('/getMeetingSummary')) {
+          return { code: 0, data: { transcript: `模式${currentMode}逐字稿` } };
+        }
+        throw new Error(`unexpected URL: ${url}`);
+      },
+    };
+
+    const result = await collectAllModeTranscripts(client, {
+      requestBody: { currentPage: 1, pageSize: 10 },
+      modeSwitchDelayMs: 0,
+    });
+
+    expect(currentUserCalls).toBe(1);
+    expect(modeCalls).toEqual([2, 1]);
+    expect(result["面试安排HR"]).toBe('安排 HR');
+    expect(result.records.map((record) => record.applicationId)).toEqual([201, 999, 101]);
+    expect(result.records.find((record) => record.applicationId === 999)?.transcript).toBe('模式1逐字稿');
+    expect(result.stats).toEqual({
+      applications: 3,
+      interviews: 3,
+      transcriptsAvailable: 3,
+      transcriptsUnavailable: 0,
+      errors: 0,
+    });
+  });
+
+  it('combines errors from both modes and deduplicates identical errors', () => {
+    const base: CollectionResult = {
+      generatedAt: 'campus',
+      source: 'source',
+      records: [],
+      errors: [{ applicationId: 1, stage: 'interviewCard', message: 'failed' }],
+      stats: { applications: 1, interviews: 0, transcriptsAvailable: 0, transcriptsUnavailable: 0, errors: 1 },
+    };
+    const combined = combineModeCollections([
+      base,
+      {
+        ...base,
+        generatedAt: 'social',
+        errors: [
+          ...base.errors,
+          { applicationId: 2, interviewId: 20, stage: 'meetingSummary', message: 'missing' },
+        ],
+      },
+    ]);
+
+    expect(combined.generatedAt).toBe('social');
+    expect(combined.errors).toHaveLength(2);
+    expect(combined.stats).toEqual({
+      applications: 2,
+      interviews: 1,
+      transcriptsAvailable: 0,
+      transcriptsUnavailable: 0,
+      errors: 2,
     });
   });
 });

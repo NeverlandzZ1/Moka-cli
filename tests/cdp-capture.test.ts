@@ -12,7 +12,7 @@ describe('discoverInterviewListPayload', () => {
       send: async () => { throw new Error('Network should not be enabled for a cache hit'); },
     } as unknown as CDPBridge;
 
-    await expect(discoverInterviewListPayload(page, bridge)).resolves.toEqual({
+    await expect(discoverInterviewListPayload(page, bridge, 15, { persist: false })).resolves.toEqual({
       currentPage: 2,
       pageSize: 10,
     });
@@ -44,12 +44,47 @@ describe('discoverInterviewListPayload', () => {
       off: () => { networkHandler = undefined; },
     } as unknown as CDPBridge;
 
-    await expect(discoverInterviewListPayload(page, bridge)).resolves.toEqual({
+    await expect(discoverInterviewListPayload(page, bridge, 15, { persist: false })).resolves.toEqual({
       currentPage: 2,
       pageSize: 10,
       filters: [],
     });
     expect(call).toBe(3);
+  });
+
+  it('ignores the tab cache and captures a fresh load-more request for offline preparation', async () => {
+    let evaluateCall = 0;
+    let networkHandler: ((params: unknown) => void) | undefined;
+    const page = {
+      evaluate: async () => {
+        evaluateCall += 1;
+        if (evaluateCall === 2) {
+          queueMicrotask(() => networkHandler?.({
+            request: {
+              method: 'POST',
+              url: 'https://app.mokahr.com/api/outer/ats-interview/interview/hr/interviewList',
+              postData: '{"currentPage":2,"pageSize":20,"fresh":true}',
+            },
+          }));
+          return { clicked: true, reason: 'load-more' };
+        }
+        return undefined;
+      },
+    } as unknown as IPage;
+    const bridge = {
+      send: async () => ({}),
+      on: (_event: string, handler: (params: unknown) => void) => { networkHandler = handler; },
+      off: () => { networkHandler = undefined; },
+    } as unknown as CDPBridge;
+
+    await expect(discoverInterviewListPayload(page, bridge, 1, {
+      forceCapture: true,
+      persist: false,
+    })).resolves.toEqual({
+      currentPage: 2,
+      pageSize: 20,
+      fresh: true,
+    });
   });
 });
 

@@ -3,7 +3,13 @@ import { dirname, resolve } from 'node:path';
 import type { IPage } from '@jackwener/opencli/types';
 import type { CDPBridge } from '@jackwener/opencli/browser/cdp';
 import type { CollectionResult, JsonRecord, TranscriptRecord } from './types.js';
-import { getMeetingSummary, listApplications, listInterviews } from './moka-api.js';
+import {
+  getCurrentUser,
+  getMeetingSummary,
+  listApplications,
+  listInterviews,
+  setHireModeHttp,
+} from './moka-api.js';
 import type { HttpClient } from './http-client.js';
 import { errorMessage } from './utils.js';
 
@@ -12,6 +18,13 @@ export interface CollectOptions {
   candidateName?: string;
   page?: IPage;
   bridge?: CDPBridge;
+  modeSwitchDelayMs?: number;
+}
+
+const DEFAULT_MODE_SWITCH_DELAY_MS = 750;
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export async function collectTranscripts(
@@ -72,6 +85,86 @@ export async function collectTranscripts(
 
 function recordKey(record: Pick<TranscriptRecord, 'applicationId' | 'interviewId'>): string {
   return `${String(record.applicationId)}:${String(record.interviewId)}`;
+}
+
+function errorKey(error: CollectionResult['errors'][number]): string {
+  return [
+    error.applicationId === undefined ? '' : String(error.applicationId),
+    error.interviewId === undefined ? '' : String(error.interviewId),
+    error.stage,
+    error.message,
+  ].join(':');
+}
+
+export function combineModeCollections(collections: CollectionResult[]): CollectionResult {
+  if (collections.length === 0) {
+    return {
+      generatedAt: new Date().toISOString(),
+      source: 'https://app.mokahr.com/interviews/overview',
+      records: [],
+      errors: [],
+      stats: {
+        applications: 0,
+        interviews: 0,
+        transcriptsAvailable: 0,
+        transcriptsUnavailable: 0,
+        errors: 0,
+      },
+    };
+  }
+
+  const records = new Map<string, TranscriptRecord>();
+  const errors = new Map<string, CollectionResult['errors'][number]>();
+  for (const collection of collections) {
+    for (const record of collection.records) records.set(recordKey(record), record);
+    for (const error of collection.errors) errors.set(errorKey(error), error);
+  }
+
+  const mergedRecords = [...records.values()];
+  const mergedErrors = [...errors.values()];
+  const applicationIds = new Set(mergedRecords.map((record) => String(record.applicationId)));
+  const interviewIds = new Set(mergedRecords.map((record) => recordKey(record)));
+  for (const error of mergedErrors) {
+    if (error.applicationId !== undefined) applicationIds.add(String(error.applicationId));
+    if (error.applicationId !== undefined && error.interviewId !== undefined) {
+      interviewIds.add(`${String(error.applicationId)}:${String(error.interviewId)}`);
+    }
+  }
+  const latest = collections[collections.length - 1]!;
+
+  return {
+    generatedAt: latest.generatedAt,
+    source: latest.source,
+    records: mergedRecords,
+    errors: mergedErrors,
+    stats: {
+      applications: applicationIds.size,
+      interviews: interviewIds.size,
+      transcriptsAvailable: mergedRecords.filter((item) => item.transcriptStatus === 'available').length,
+      transcriptsUnavailable: mergedRecords.filter((item) => item.transcriptStatus === 'not_available').length,
+      errors: mergedErrors.length,
+    },
+  };
+}
+
+export async function collectAllModeTranscripts(
+  client: HttpClient,
+  options: CollectOptions = {},
+): Promise<CollectionResult> {
+  const currentUser = await getCurrentUser(client);
+  const modeSwitchDelayMs = options.modeSwitchDelayMs ?? DEFAULT_MODE_SWITCH_DELAY_MS;
+  const collections: CollectionResult[] = [];
+
+  for (const mode of ['campus', 'social'] as const) {
+    await setHireModeHttp(client, mode);
+    if (modeSwitchDelayMs > 0) await wait(modeSwitchDelayMs);
+    collections.push(await collectTranscripts(client, options));
+  }
+
+  return {
+    ...combineModeCollections(collections),
+    "面试安排HR": currentUser.name,
+  };
 }
 
 function readExistingCollection(path: string): CollectionResult | undefined {

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const scriptPath = path.join(repoRoot, "skills", "moka-transcript", "scripts", "sync-lark-base.mjs");
+const scriptPath = path.join(repoRoot, "skills", "moka-transcriptV2", "scripts", "sync-lark-base.mjs");
 const mockCliPath = path.join(repoRoot, "tests", "fixtures", "mock-lark-cli.mjs");
 const tempDirs: string[] = [];
 
@@ -38,22 +38,29 @@ async function setup(initialState: Record<string, unknown> = {}) {
   tempDirs.push(dir);
   const inputPath = path.join(dir, "transcript.json");
   const statePath = path.join(dir, "mock-state.json");
+  const wrapperPath = path.join(dir, "mock-lark-cli.cmd");
   await writeFile(statePath, JSON.stringify({ records: [], nextId: 1, ...initialState }), "utf8");
-  return { dir, inputPath, statePath };
+  await writeFile(wrapperPath, `@echo off\r\n"${process.execPath}" "${mockCliPath}" %*\r\n`, "utf8");
+  return { dir, inputPath, statePath, wrapperPath };
 }
 
-async function runScript(inputPath: string, statePath: string, records: unknown[]) {
+async function runScript(inputPath: string, statePath: string, wrapperPath: string, records: unknown[]) {
   await writeFile(inputPath, JSON.stringify({
     generatedAt: new Date().toISOString(),
     "面试安排HR": "HR User",
     records,
   }), "utf8");
-  const result = await execFileAsync(process.execPath, [scriptPath, "--input", inputPath], {
+  const result = await execFileAsync(process.execPath, [
+    scriptPath,
+    "--input", inputPath,
+    "--base-token", "app_token",
+    "--transcript-table-id", "tbl_transcripts",
+    "--lark-cli", wrapperPath,
+  ], {
     cwd: repoRoot,
     env: {
       ...process.env,
       MOCK_LARK_STATE: statePath,
-      MOKA_LARK_CLI_COMMAND_JSON: JSON.stringify([process.execPath, mockCliPath]),
     },
     maxBuffer: 10 * 1024 * 1024,
   });
@@ -70,9 +77,11 @@ afterEach(async () => {
 });
 
 describe("sync-lark-base script", () => {
-  it("deduplicates repeated input keys before creating", async () => {
+  it("deduplicates repeated input keys before one batch create", async () => {
     const ctx = await setup();
-    const summary = await runScript(ctx.inputPath, ctx.statePath, [record(), record({ candidateName: "更新后的示例名" })]);
+    const summary = await runScript(ctx.inputPath, ctx.statePath, ctx.wrapperPath, [
+      record(), record({ candidateName: "更新后的示例名" }),
+    ]);
     const state = await mockState(ctx.statePath);
 
     expect(summary.ok).toBe(true);
@@ -80,68 +89,69 @@ describe("sync-lark-base script", () => {
     expect(summary.deduplicatedRecords).toBe(1);
     expect(summary.inputDuplicatesDropped).toBe(1);
     expect(summary.created).toBe(1);
-    expect(state.calls.creates).toBe(1);
-    expect(state.records).toHaveLength(1);
-  });
-
-  it("updates an existing business key on a later run without creating again", async () => {
-    const ctx = await setup();
-    await runScript(ctx.inputPath, ctx.statePath, [record()]);
-    const second = await runScript(ctx.inputPath, ctx.statePath, [record({ transcript: "new transcript" })]);
-    const state = await mockState(ctx.statePath);
-
-    expect(second.created).toBe(0);
-    expect(second.updated).toBe(1);
-    expect(state.calls.creates).toBe(1);
-    expect(state.calls.updates).toBe(1);
-    expect(state.records).toHaveLength(1);
-  });
-
-  it("recovers a committed create after an ambiguous CLI failure without replaying it", async () => {
-    const ctx = await setup({ ambiguousTranscriptCreateOnce: true });
-    const summary = await runScript(ctx.inputPath, ctx.statePath, [record()]);
-    const state = await mockState(ctx.statePath);
-
-    expect(summary.created).toBe(0);
-    expect(summary.recoveredCreates).toBe(1);
-    expect(state.calls.creates).toBe(1);
-    expect(state.records).toHaveLength(1);
-  });
-
-  it("recovers an ambiguous interviewer create and writes the link in the transcript upsert", async () => {
-    const ctx = await setup({ ambiguousInterviewerCreateOnce: true });
-    const summary = await runScript(ctx.inputPath, ctx.statePath, [record({ interviewerNames: ["示例面试官"] })]);
-    const state = await mockState(ctx.statePath);
-    const interviewers = state.records.filter((item: { tableId: string }) => item.tableId === "tblyYe2fDhI0Lluv");
-    const transcripts = state.records.filter((item: { tableId: string }) => item.tableId === "tblUYL6KszcCEzuw");
-
-    expect(summary.recoveredInterviewerCreates).toBe(1);
-    expect(interviewers).toHaveLength(1);
-    expect(transcripts).toHaveLength(1);
-    expect(transcripts[0]!.fields["面试官（关联）"]).toEqual([{ id: interviewers[0]!.record_id }]);
-  });
-
-  it("reports existing duplicate conflicts and updates only one canonical record", async () => {
-    const fields = { "申请ID": 825605224, "面试ID": 48113316 };
-    const ctx = await setup({
-      nextId: 3,
-      records: [
-        { record_id: "rec00002", tableId: "tblUYL6KszcCEzuw", fields },
-        { record_id: "rec00001", tableId: "tblUYL6KszcCEzuw", fields },
-      ],
-    });
-    const summary = await runScript(ctx.inputPath, ctx.statePath, [record()]);
-    const state = await mockState(ctx.statePath);
-
-    expect(summary.created).toBe(0);
-    expect(summary.updated).toBe(1);
-    expect(summary.duplicateConflicts).toEqual([{
-      applicationId: 825605224,
-      interviewId: 48113316,
-      recordIds: ["rec00001", "rec00002"],
-    }]);
+    expect(summary.failed).toBe(0);
+    expect(state.calls.batchCreates).toBe(1);
     expect(state.calls.creates).toBe(0);
-    expect(state.calls.updates).toBe(1);
+    expect(state.calls.lists).toBe(0);
+    expect(state.records).toHaveLength(1);
+    expect(state.records[0].fields["候选人姓名"]).toBe("更新后的示例名");
+  });
+
+  it("creates every distinct interview and leaves existing Base records for the dedup script", async () => {
+    const ctx = await setup();
+    const summary = await runScript(ctx.inputPath, ctx.statePath, ctx.wrapperPath, [
+      record(), record({ interviewId: 48113317, candidateName: "另一位候选人" }),
+    ]);
+    const state = await mockState(ctx.statePath);
+
+    expect(summary.ok).toBe(true);
+    expect(summary.created).toBe(2);
+    expect(state.calls.batchCreates).toBe(1);
+    expect(state.calls.lists).toBe(0);
     expect(state.records).toHaveLength(2);
+    expect(state.records.map((item: { fields: Record<string, unknown> }) => item.fields["面试ID"])).toEqual([48113316, 48113317]);
+  });
+
+  it("falls back to single creates when batch create fails", async () => {
+    const ctx = await setup({ failBatchOnce: true });
+    const summary = await runScript(ctx.inputPath, ctx.statePath, ctx.wrapperPath, [
+      record(), record({ interviewId: 48113317 }),
+    ]);
+    const state = await mockState(ctx.statePath);
+
+    expect(summary.ok).toBe(true);
+    expect(summary.batchCreateFallback).toBe(true);
+    expect(summary.created).toBe(2);
+    expect(summary.failed).toBe(0);
+    expect(state.calls.batchCreates).toBe(1);
+    expect(state.calls.creates).toBe(2);
+    expect(state.records).toHaveLength(2);
+  });
+
+  it("reports a partial fallback failure instead of claiming success", async () => {
+    const ctx = await setup({ failBatchOnce: true, failCreateForInterviewId: 48113317 });
+    const summary = await runScript(ctx.inputPath, ctx.statePath, ctx.wrapperPath, [
+      record(), record({ interviewId: 48113317 }),
+    ]);
+    const state = await mockState(ctx.statePath);
+
+    expect(summary.ok).toBe(false);
+    expect(summary.created).toBe(1);
+    expect(summary.failed).toBe(1);
+    expect(summary.errors.some((item: { phase: string }) => item.phase === "upsert-fallback")).toBe(true);
+    expect(state.records).toHaveLength(1);
+  });
+
+  it("returns a successful no-op for an empty input", async () => {
+    const ctx = await setup();
+    const summary = await runScript(ctx.inputPath, ctx.statePath, ctx.wrapperPath, []);
+    const state = await mockState(ctx.statePath);
+
+    expect(summary.created).toBe(0);
+    expect(summary.ok).toBe(true);
+    expect(summary.deduplicatedRecords).toBe(0);
+    expect(state.calls?.batchCreates || 0).toBe(0);
+    expect(state.calls?.creates || 0).toBe(0);
+    expect(state.records).toHaveLength(0);
   });
 });

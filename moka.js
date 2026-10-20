@@ -1,6 +1,6 @@
 // src/plugin.ts
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError } from "@jackwener/opencli/errors";
+import { ArgumentError, AuthRequiredError as AuthRequiredError3, CommandExecutionError as CommandExecutionError3 } from "@jackwener/opencli/errors";
 
 // src/constants.ts
 var MOKA_ORIGIN = "https://app.mokahr.com";
@@ -309,9 +309,12 @@ async function probeMokaLogin(page) {
   };
 }
 var INTERVIEW_LIST_PAYLOAD_CACHE_KEY = "__opencli_moka_interview_list_payload__";
-async function discoverInterviewListPayload(page, bridge, timeoutSeconds = 15) {
-  const cached = await page.evaluate((key) => sessionStorage.getItem(key), INTERVIEW_LIST_PAYLOAD_CACHE_KEY);
+async function discoverInterviewListPayload(page, bridge, timeoutSeconds = 15, options = {}) {
+  const cached = options.forceCapture ? void 0 : await page.evaluate((key) => sessionStorage.getItem(key), INTERVIEW_LIST_PAYLOAD_CACHE_KEY);
   if (cached) return parseJsonObject(cached, "\u7F13\u5B58\u7684 Moka interviewList \u8BF7\u6C42\u4F53");
+  if (options.forceCapture) {
+    await page.evaluate((key) => sessionStorage.removeItem(key), INTERVIEW_LIST_PAYLOAD_CACHE_KEY);
+  }
   await bridge.send("Network.enable");
   let handler;
   let timeoutHandle;
@@ -354,9 +357,11 @@ async function discoverInterviewListPayload(page, bridge, timeoutSeconds = 15) {
         INTERVIEW_LIST_PAYLOAD_CACHE_KEY,
         JSON.stringify(payload)
       );
-      try {
-        writePayloadBundle(payload);
-      } catch {
+      if (options.persist !== false) {
+        try {
+          writePayloadBundle(payload);
+        } catch {
+        }
       }
       return payload;
     } catch (error) {
@@ -561,6 +566,20 @@ async function getCurrentUser(client) {
   }
   return users[0];
 }
+async function setHireModeHttp(client, mode) {
+  const currentHireMode = HIRE_MODE_VALUES[mode];
+  const response = await client.fetchJson(API_PATHS.updateCurrentHireMode, {
+    method: "PUT",
+    body: { currentHireMode },
+    timeoutMs: 3e4
+  });
+  assertApiResponse(response, "update_currenthiremode_fields");
+  return {
+    mode,
+    modeLabel: mode === "campus" ? "\u6821\u62DB" : "\u793E\u62DB",
+    currentHireMode
+  };
+}
 async function setHireMode(page, bridge, mode) {
   const currentHireMode = HIRE_MODE_VALUES[mode];
   const response = await page.evaluate(async ({ path, value }) => {
@@ -661,7 +680,7 @@ async function resolveBaseBody(options) {
     return await discoverInterviewListPayload(options.page, options.bridge);
   }
   throw new CommandExecutionError(
-    "Moka interviewList \u8BF7\u6C42\u4F53\u6A21\u677F\u7F3A\u5931\u3002\u8BF7\u5148\u8FD0\u884C opencli moka login \u6216 opencli moka export-transcripts(\u9ED8\u8BA4\u8D70 CDP)\u4E00\u6B21,\u8BA9 CLI \u6293\u53D6\u5E76\u7F13\u5B58\u8BF7\u6C42\u4F53\u6A21\u677F\u3002"
+    "Moka interviewList \u8BF7\u6C42\u4F53\u6A21\u677F\u7F3A\u5931\u3002\u8BF7\u8FD0\u884C opencli moka login\uFF0C\u767B\u5F55\u540E\u6267\u884C opencli moka capture-payload -f json\uFF0C\u518D\u91CD\u8BD5\u79BB\u7EBF\u91C7\u96C6\u3002"
   );
 }
 async function listApplications(client, options = {}) {
@@ -710,6 +729,10 @@ async function getMeetingSummary(client, applicationId, interviewId) {
 }
 
 // src/collector.ts
+var DEFAULT_MODE_SWITCH_DELAY_MS = 750;
+function wait(milliseconds) {
+  return new Promise((resolve2) => setTimeout(resolve2, milliseconds));
+}
 async function collectTranscripts(client, options = {}) {
   const applications = await listApplications(client, options);
   const records = [];
@@ -762,6 +785,75 @@ async function collectTranscripts(client, options = {}) {
 }
 function recordKey(record) {
   return `${String(record.applicationId)}:${String(record.interviewId)}`;
+}
+function errorKey(error) {
+  return [
+    error.applicationId === void 0 ? "" : String(error.applicationId),
+    error.interviewId === void 0 ? "" : String(error.interviewId),
+    error.stage,
+    error.message
+  ].join(":");
+}
+function combineModeCollections(collections) {
+  if (collections.length === 0) {
+    return {
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      source: "https://app.mokahr.com/interviews/overview",
+      records: [],
+      errors: [],
+      stats: {
+        applications: 0,
+        interviews: 0,
+        transcriptsAvailable: 0,
+        transcriptsUnavailable: 0,
+        errors: 0
+      }
+    };
+  }
+  const records = /* @__PURE__ */ new Map();
+  const errors = /* @__PURE__ */ new Map();
+  for (const collection of collections) {
+    for (const record of collection.records) records.set(recordKey(record), record);
+    for (const error of collection.errors) errors.set(errorKey(error), error);
+  }
+  const mergedRecords = [...records.values()];
+  const mergedErrors = [...errors.values()];
+  const applicationIds = new Set(mergedRecords.map((record) => String(record.applicationId)));
+  const interviewIds = new Set(mergedRecords.map((record) => recordKey(record)));
+  for (const error of mergedErrors) {
+    if (error.applicationId !== void 0) applicationIds.add(String(error.applicationId));
+    if (error.applicationId !== void 0 && error.interviewId !== void 0) {
+      interviewIds.add(`${String(error.applicationId)}:${String(error.interviewId)}`);
+    }
+  }
+  const latest = collections[collections.length - 1];
+  return {
+    generatedAt: latest.generatedAt,
+    source: latest.source,
+    records: mergedRecords,
+    errors: mergedErrors,
+    stats: {
+      applications: applicationIds.size,
+      interviews: interviewIds.size,
+      transcriptsAvailable: mergedRecords.filter((item) => item.transcriptStatus === "available").length,
+      transcriptsUnavailable: mergedRecords.filter((item) => item.transcriptStatus === "not_available").length,
+      errors: mergedErrors.length
+    }
+  };
+}
+async function collectAllModeTranscripts(client, options = {}) {
+  const currentUser = await getCurrentUser(client);
+  const modeSwitchDelayMs = options.modeSwitchDelayMs ?? DEFAULT_MODE_SWITCH_DELAY_MS;
+  const collections = [];
+  for (const mode of ["campus", "social"]) {
+    await setHireModeHttp(client, mode);
+    if (modeSwitchDelayMs > 0) await wait(modeSwitchDelayMs);
+    collections.push(await collectTranscripts(client, options));
+  }
+  return {
+    ...combineModeCollections(collections),
+    "\u9762\u8BD5\u5B89\u6392HR": currentUser.name
+  };
 }
 function readExistingCollection(path) {
   if (!existsSync3(path)) return void 0;
@@ -1148,6 +1240,33 @@ function collectionOptions(kwargs) {
     ...requestBody ? { requestBody } : {}
   };
 }
+async function ensureInterviewOverview(page) {
+  const deadline = Date.now() + 2e4;
+  let navigationClicked = false;
+  while (Date.now() < deadline) {
+    const ready = await page.evaluate(() => {
+      const atOverview = window.location.pathname === "/interviews/overview";
+      const hasLoadMore = Array.from(document.querySelectorAll("button")).some((button) => button.classList.contains("table-load-more") || button.textContent?.trim() === "\u52A0\u8F7D\u66F4\u591A");
+      return {
+        url: window.location.href,
+        bodyLength: document.body?.innerText?.length ?? 0,
+        hasLoadMore
+      };
+    }).catch(() => void 0);
+    if (ready?.url.includes("/interviews/overview") && ready.bodyLength > 0 && ready.hasLoadMore) return;
+    if (!navigationClicked && ready && !ready.url.includes("/interviews/overview")) {
+      try {
+        await page.click('a[href="/interviews"], a[href$="/interviews"]', { firstOnMulti: true });
+        navigationClicked = true;
+      } catch {
+      }
+    }
+    await new Promise((resolve2) => setTimeout(resolve2, 500));
+  }
+  throw new CommandExecutionError3(
+    navigationClicked ? "\u5DF2\u70B9\u51FB Moka \u4FA7\u680F\u201C\u9762\u8BD5\u5B89\u6392\u201D\uFF0C\u4F46\u9762\u8BD5\u603B\u89C8\u672A\u80FD\u5728 20 \u79D2\u5185\u52A0\u8F7D\u5B8C\u6210" : "\u5F53\u524D Moka \u9875\u9762\u672A\u627E\u5230\u4FA7\u680F\u201C\u9762\u8BD5\u5B89\u6392\u201D\u5165\u53E3\uFF0C\u65E0\u6CD5\u8FDB\u5165\u9762\u8BD5\u603B\u89C8\u6355\u83B7 payload"
+  );
+}
 async function withHttpClient(kwargs, fn) {
   const noCdp = Boolean(kwargs["offline"]);
   if (noCdp) {
@@ -1201,6 +1320,47 @@ cli({
       profileDir: launch.profileDir
     }];
   }
+});
+cli({
+  site: "moka",
+  name: "capture-payload",
+  description: "\u767B\u5F55\u5B8C\u6210\u540E\u5728\u7EBF\u6355\u83B7\u79BB\u7EBF\u5BFC\u51FA\u6240\u9700\u7684 interviewList \u8BF7\u6C42\u4F53",
+  access: "read",
+  example: "opencli moka capture-payload -f json",
+  strategy: Strategy.LOCAL,
+  browser: false,
+  defaultFormat: "json",
+  args: [commonPortArg],
+  columns: ["offlineReady", "mokaLogin", "currentUserName", "payloadSaved", "payloadPath", "message"],
+  func: async (kwargs) => withMokaPage(
+    intArg(kwargs.port, DEFAULT_CDP_PORT),
+    async (page, bridge) => {
+      const status = await probeMokaLogin(page);
+      if (status.mokaLogin !== "authenticated") {
+        throw new AuthRequiredError3(
+          "app.mokahr.com",
+          "Moka \u5C1A\u672A\u767B\u5F55\u3002\u8BF7\u5148\u5728\u5F53\u524D CDP Chrome \u4E2D\u5B8C\u6210\u767B\u5F55\uFF0C\u518D\u8FD0\u884C opencli moka capture-payload\u3002"
+        );
+      }
+      await dumpCookiesFromBridge(bridge);
+      await ensureInterviewOverview(page);
+      const payload = await discoverInterviewListPayload(page, bridge, 20, {
+        forceCapture: true,
+        persist: false
+      });
+      const saved = writePayloadBundle(payload);
+      const currentUser = await getCurrentUser(createHttpClient());
+      return [{
+        offlineReady: true,
+        mokaLogin: "authenticated",
+        currentUserName: currentUser.name,
+        payloadSaved: true,
+        payloadPath: defaultPayloadPath(),
+        payloadUpdatedAt: saved.updatedAt,
+        message: "\u79BB\u7EBF\u5BFC\u51FA\u51C6\u5907\u5B8C\u6210\uFF0C\u73B0\u5728\u53EF\u4EE5\u5173\u95ED CDP Chrome\u3002"
+      }];
+    }
+  )
 });
 cli({
   site: "moka",
@@ -1322,7 +1482,7 @@ cli({
   site: "moka",
   name: "export-transcripts",
   aliases: ["export"],
-  description: "\u5BFC\u51FA\u5019\u9009\u4EBA\u3001\u5C97\u4F4D\u3001\u9762\u8BD5\u5B98\u548C\u5168\u90E8\u9762\u8BD5\u9010\u5B57\u7A3F",
+  description: "\u4F9D\u6B21\u6293\u53D6\u6821\u62DB\u548C\u793E\u62DB\u5E76\u5408\u5E76\u5BFC\u51FA\u5019\u9009\u4EBA\u3001\u5C97\u4F4D\u3001\u9762\u8BD5\u5B98\u548C\u5168\u90E8\u9762\u8BD5\u9010\u5B57\u7A3F",
   access: "read",
   example: "opencli moka export-transcripts --output ./moka-transcripts.json -f json",
   strategy: Strategy.LOCAL,
@@ -1337,20 +1497,11 @@ cli({
     { name: "request-json", valueRequired: true, help: "\u9AD8\u7EA7\u7528\u6CD5\uFF1A\u8986\u76D6 interviewList \u8BF7\u6C42\u4F53 JSON" }
   ],
   func: async (kwargs) => withHttpClient(kwargs, async (client, ctx) => {
-    const currentUser = await getCurrentUser(client);
-    const collected = await collectTranscripts(client, {
+    const result = await collectAllModeTranscripts(client, {
       ...collectionOptions(kwargs),
       ...ctx.page ? { page: ctx.page } : {},
       ...ctx.bridge ? { bridge: ctx.bridge } : {}
     });
-    const result = {
-      generatedAt: collected.generatedAt,
-      "\u9762\u8BD5\u5B89\u6392HR": currentUser.name,
-      source: collected.source,
-      records: collected.records,
-      errors: collected.errors,
-      stats: collected.stats
-    };
     const written = typeof kwargs.output === "string" && kwargs.output.trim() ? writeCollection(kwargs.output.trim(), result, { overwrite: Boolean(kwargs.overwrite) }) : void 0;
     return written ? { ...written.result, outputPath: written.outputPath } : result;
   })

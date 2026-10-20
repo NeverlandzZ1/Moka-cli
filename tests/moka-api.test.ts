@@ -3,6 +3,7 @@ import {
   defaultInterviewListBody,
   getCurrentUser,
   setHireMode,
+  setHireModeHttp,
   shanghaiDayBounds,
 } from '../src/moka-api.js';
 import type { HttpClient } from '../src/http-client.js';
@@ -69,6 +70,28 @@ describe('default interview discovery ranges', () => {
 });
 
 describe('hire mode', () => {
+  it.each([
+    ['campus', 2, '校招'],
+    ['social', 1, '社招'],
+  ] as const)('switches to %s directly through the HTTP client', async (mode, value, label) => {
+    const fetchJson = vi.fn().mockResolvedValue({});
+    const client: HttpClient = { fetchJson };
+
+    await expect(setHireModeHttp(client, mode)).resolves.toEqual({
+      mode,
+      modeLabel: label,
+      currentHireMode: value,
+    });
+    expect(fetchJson).toHaveBeenCalledWith(
+      '/api/users/update_currenthiremode_fields',
+      {
+        method: 'PUT',
+        body: { currentHireMode: value },
+        timeoutMs: 30_000,
+      },
+    );
+  });
+
   it.each([
     ['campus', 2, '校招'],
     ['social', 1, '社招'],

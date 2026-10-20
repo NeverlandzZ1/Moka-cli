@@ -284,7 +284,7 @@ function tryParseJson(text) {
 /**
  * 执行 lark-cli 命令。
  *
- * 当 jsonPayload 非空且较长时（超过 MAX_INLINE_JSON），将 JSON 写入当前工作目录下的
+ * 在 Windows 上，或 jsonPayload 较长时（超过 MAX_INLINE_JSON），将 JSON 写入当前工作目录下的
  * 临时文件，并用 lark-cli 的 `--json @./filename` 语法引用，以绕过 Windows 命令行
  * 长度限制（ENAMETOOLONG）。lark-cli 要求 @file 路径必须是相对路径。
  *
@@ -299,8 +299,8 @@ function runLarkCli(command, args, timeoutMs, jsonPayload) {
     let tempFile = null;
     let finalArgs = args;
 
-    // Windows（或任意平台）上 JSON payload 过大时，切换为 @file.json 语法
-    if (jsonPayload && jsonPayload.length > MAX_INLINE_JSON) {
+    // Windows 始终通过文件传中文 JSON；其他平台仅在 payload 过大时切换
+    if (jsonPayload && (process.platform === "win32" || jsonPayload.length > MAX_INLINE_JSON)) {
       const fileName = `lark-payload-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
       tempFile = path.join(process.cwd(), fileName);
       fsSync.writeFileSync(tempFile, jsonPayload, "utf8");
