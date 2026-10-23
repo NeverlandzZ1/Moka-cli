@@ -39,27 +39,31 @@ description: 为 HR 配置 Moka 离线采集环境，或在定时任务中抓取
 - 时区：`Asia/Shanghai`
 - 执行 Agent：`当前助手自身`
 - 飞书 Base：首次配置时由用户提供（支持新建、指定或使用已有配置），存入 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段；后续从该配置读取
+- 定时报告云盘目录：首次配置时由用户提供飞书云盘文件夹 URL，存入同一配置的 `report_folder_url`；定时任务只从该 URL 解析 folder token，**没有固定目录或旧目录回退**。解析与安全校验使用 `scripts/report-targets.mjs`。
+- 报告文件 owner：本次导出 JSON 顶层 `面试安排HR`（Moka 当前登录账号）经飞书通讯录唯一匹配得到的 open_id；不是 `record.interviewerNames`，也不是固定 HR open_id。
 - 飞书同步脚本：`scripts/sync-lark-base.mjs`（Windows 上所有 JSON 均用 `@./file.json` 临时文件传参；其他平台超过 3000 字符时切换）
 - 已通知预筛脚本：`scripts/filter-notified-records.mjs`（只读 Base；在评分前按「申请ID + 面试ID」过滤 `是否已通知=是` 的记录）
 - 飞书去重脚本：`scripts/deduplicate-lark-base.mjs`（逐条删除策略，非 batch delete；同样内置 @file 保护）
 - 人员字段回填脚本：`scripts/backfill-interviewer-user.mjs`（dedup 之后运行；面试官从每行「面试官」text 解析，面试安排 HR 从本次 JSON 顶层 `面试安排HR` 解析并按联合键限定本次记录；两者分别写入对应 user 列。**已修复两个 Windows 兼容问题**：① `search-user` 从括号中提取中文名搜索,避免空格导致位置参数错误；② `runLarkCli` 对所有 JSON payload 强制走 `@file` 模式,避免中文字段名在 cmd.exe 编码链路中被破坏）
 - 脚本契约：`references/lark-base-write.md`
+- 飞书目标配置辅助脚本：`scripts/report-targets.mjs`（读取本机 `moka-config.json` 的 `feishu_base_url` 做同租户校验，仅修改其中的 `report_folder_url`，并从完整通讯录搜索结果严格匹配本次 Moka HR；不调用飞书 CLI、不读取登录凭据）
 - 定时报告引擎（必需的独立 skill）：`interviewer-review`。它是评分规范、统计、渲染、校验与 HTML 模板的**唯一真源**；本 skill 不保留副本，不得降级回手写 HTML 或旧 `generate-report.mjs`。
-- 定时报告云盘目录：`https://trip.larkenterprise.com/drive/folder/NY5IfFoh5lQmIaddwoSc6oJznBc`，folder token 为 `NY5IfFoh5lQmIaddwoSc6oJznBc`。报告上传后使用飞书返回的真实文件 URL 写入 `record.reviewReportUrl`。
+- 报告上传后使用飞书返回的真实文件 URL 写入 `record.reviewReportUrl`；`report_folder_url` 仅由用户在普通配置入口确认或更换。
 
 始终先解析出绝对输出路径再传给 `--output`；不要把未展开的 `~` 直接交给 OpenCLI。
 
 ## 首次配置入口
 
-**⚠️ 交互原则:选择尽量一次性收齐,不要一步问一次。** 首次配置涉及 3 个用户选择:
+**⚠️ 交互原则:选择尽量一次性收齐,不要一步问一次。** 首次配置涉及 4 个用户选择:
 1. 飞书 Base URL 来源(使用已有 config / 新建 / 手动指定)
-2. Moka 登录态处理(本地有 cookie 时:继续用 / 重新登录;本地无 cookie 时:无选项,必须重新登录)
-3. 是否创建定时任务(是 / 否,若是则问执行时机)
+2. 面试报告飞书云盘文件夹(使用已有 `report_folder_url` / 用户提供新 URL；无已有值时必须提供)
+3. Moka 登录态处理(本地有 cookie 时:继续用 / 重新登录;本地无 cookie 时:无选项,必须重新登录)
+4. 是否创建定时任务(是 / 否,若是则问执行时机)
 
 **执行顺序**:
-- 第 1、3 项**可以合并成一次多问选项框**,在 lark-cli 授权通过后一并向用户提问,一次拿齐再往下走。第 2 项**必须先做磁盘 cookie 存在性探测**才能决定要不要给选项(本地无 cookie 时没有选项可选),所以放在探测之后紧接着单独问——不能提前混进"一次性选项框",否则用户看到的"继续用"选项在本地无 cookie 时是无效的。
+- 第 1、2、4 项**可以合并成一次多问选项框**,在 lark-cli 授权通过后一并向用户提问,一次拿齐再往下走。第 3 项**必须先做磁盘 cookie 存在性探测**才能决定要不要给选项(本地无 cookie 时没有选项可选),所以放在探测之后紧接着单独问——不能提前混进"一次性选项框",否则用户看到的"继续用"选项在本地无 cookie 时是无效的。
 - 若宿主的选项框工具不支持一次收多个问题,退化为顺序问,但**每个问题的选项要一次给全**,不要中途插入其他步骤打断用户。
-- **本 Skill 只负责 Moka 相关配置**——lark-cli 的授权二维码、系统软件的安装审批等属于其他子步骤的必要交互,该问还要问,不合并进上述 3 个选项。
+- **本 Skill 只负责 Moka 相关配置**——lark-cli 的授权二维码、系统软件的安装审批等属于其他子步骤的必要交互,该问还要问,不合并进上述 4 个选项。
 
 ### 1. 探测并补齐环境
 
@@ -197,15 +201,28 @@ lark-cli 授权通过后,用**选项框**让用户明确选择本次要用哪个
 | ✨ 让智能体新建 | 使用 `lark-cli base +app-table-create` 在已授权的飞书租户下创建新的多维表格,表名默认 `Moka面试转写记录`,创建后打开面试转写表并把带 `?table=<id>` 的完整 URL 写入配置 |
 | 🔗 用户指定 URL | 用户手动粘贴飞书 Base URL(格式:`https://xxx.feishu.cn/base/<app_token>?table=<table_id>`,必须包含 `?table=<id>` 参数——即在多维表格中选中目标面试转写表后再复制 URL),Agent 验证可访问后写入配置 |
 
-用户提供或新建后,写入 `~/.opencli/moka-config.json`:
+用户提供或新建后,更新 `~/.opencli/moka-config.json` 中的 `feishu_base_url`，**保留文件里的其他配置项**（尤其已有的 `report_folder_url`）；用户选"使用已有"时保留原值不重写。后续首次配置的飞书写入均使用该 Base URL。
 
-```json
-{ "feishu_base_url": "<用户提供或新建的URL>" }
+### 3.1 收集报告上传文件夹 URL
+
+同样让用户确认本次 HTML 的飞书云盘目标目录。若配置已有 `report_folder_url`，展示完整 URL 并提供"使用已有目录"和"指定新目录 URL"；没有该字段时只让用户提供 URL，不得暗中沿用原先的固定目录。用户给的是**文件夹链接**，格式如 `https://<当前飞书租户>/drive/folder/<folder_token>`，不是单个文件、Base 或 Wiki 页面链接。
+
+确认 Base URL 已写入配置后，先**只读检查**用户提供的 URL 格式：
+
+```text
+node "<Skill目录>/scripts/report-targets.mjs" check-folder --url "<用户提供的文件夹URL>"
 ```
 
-后续**首次配置的所有飞书写入操作**都从该文件读取 `feishu_base_url`。用户选"使用已有"时保留原值不重写。
+用返回的 `folderToken` 通过飞书**当前用户身份**查询真实元数据，核对确为用户指定的文件夹；协作者列表可辅助判断当前身份是否有编辑权限，但 `permission-get-setting` 可能只允许 owner 调用，**不能把读取公共设置失败直接判成无上传权限**。确认目标真实可访问后才保存，并回读：
 
-**⚠️ 定时采集入口不会再问这个选项**——定时任务直接读 `~/.opencli/moka-config.json` 里的 `feishu_base_url`,不弹选项框、不再交互(无人值守场景没法交互)。要换写入目标只能来首次配置入口重新走这一步。
+```text
+node "<Skill目录>/scripts/report-targets.mjs" set-folder --url "<用户提供的文件夹URL>"
+node "<Skill目录>/scripts/report-targets.mjs" get-folder
+```
+
+选"使用已有目录"时只运行 `get-folder` 并核对真实元数据。辅助脚本要求 HTTPS、路径为 `/drive/folder/<token>` 且与已配置 Base 同一租户；保存 `report_folder_url` 时保留其他配置项，不额外持久化 token。元数据查询失败或明确无上传权限则停止配置并请用户更换目录或联系文件夹所有者授权，不能换到别的目录；已验证的旧配置也不因新 URL 无效被覆盖。只读验证不能证明上传权限，最终以真实上传响应为准。
+
+**⚠️ 定时采集入口不会再问 Base 或报告目录**——直接读配置中的 `feishu_base_url` 和 `report_folder_url`，缺失或失效时不上传、更不回退到旧目录；换目标必须在普通配置入口重新确认。
 
 ### 4. 确保本地 Moka 离线采集材料就绪
 
@@ -283,11 +300,11 @@ Cron：<根据用户执行时机生成>
 
 ## 定时采集入口
 
-该入口面向无人值守运行。**不检测 CDP、不主动读取或检查 Moka cookie 内容、不检查 lark-cli 授权**。调用一次 `opencli moka export-transcripts --offline` 获取今日全量 JSON；CLI 在真实请求中验证应用 session、必要时通过 Passport 静默续期，并完成内部采集与合并。**飞书 Base URL 直接从 `~/.opencli/moka-config.json` 的 `feishu_base_url` 字段读取，不弹选项框、不问用户。** 自动续期、飞书写入或配置失败时按对应阶段中断并汇报，让 HR 回普通配置入口处理。
+该入口面向无人值守运行。**不检测 CDP、不主动读取或检查 Moka cookie 内容、不检查 lark-cli 授权**。调用一次 `opencli moka export-transcripts --offline` 获取今日全量 JSON；CLI 在真实请求中验证应用 session、必要时通过 Passport 静默续期，并完成内部采集与合并。**飞书 Base URL 与报告目录 URL 分别从 `~/.opencli/moka-config.json` 的 `feishu_base_url`、`report_folder_url` 读取，不弹选项框、不问用户。** 自动续期、飞书写入或配置失败时按对应阶段中断并汇报，让 HR 回普通配置入口处理。
 
 **lark-cli 路径定位**：定时任务运行环境中 `lark-cli` 可能不在默认 PATH 中。若直接执行 `lark-cli` 失败，通过 `where lark-cli`（Windows）或 `which lark-cli`（macOS/Linux）定位真实可执行文件路径，后续所有 sync、dedup 等脚本调用都通过 `--lark-cli "<路径>"` 参数传递。不要修改用户的全局 PATH。
 
-确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，两类人员字段由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成并上传到固定飞书云盘目录，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
+确认当前 Skill 目录存在 `scripts/sync-lark-base.mjs`、`scripts/deduplicate-lark-base.mjs`、`scripts/backfill-interviewer-user.mjs`、`scripts/report-targets.mjs`，且宿主已安装可访问的 `interviewer-review` skill。飞书记录的写入由 sync 脚本执行，去重清理由 dedup 脚本执行，两类人员字段由 backfill 脚本执行；Agent 禁止自行调用 `lark-cli base +record-upsert`、`+record-batch-create`、`+record-batch-update` 写面试转写表。HTML 必须由 `interviewer-review` 生成，只上传到配置指定的飞书云盘文件夹，返回 URL 写入 `record.reviewReportUrl`。维护 Base 脚本时才读取 `references/lark-base-write.md`。
 
 ### 1. 覆盖导出今日全量 JSON
 
@@ -414,15 +431,25 @@ python scripts/validate_report.py "<报告.html>" --template assets/report-templ
 5. 从 `analysis.json.radar` 写入 `record.reviewScores`：`openingFlow`、`questionQuality`、`listening`、`followUpDepth`、`scaleControl`、`feedbackExperience`；同时写入 `redLineHits`（由已确认 `redlines` 派生；HR面试固定为空数组），以保持现有 Base 字段契约不变。
 6. 单条评分、渲染或校验失败：写 `record.reviewError = "interviewer-review failed: <简短原因>"`，保留本地中间文件供排查，不阻断其他记录。**但校验失败率超过 50% 时应在汇报中明确标注"analysis.json 质量需人工排查"**——不应将系统性失败当作偶发失败处理。
 
-### 后处理-2. 上传校验通过的 HTML 到飞书云盘并写回 URL
+### 后处理-2. 上传校验通过的 HTML 到用户指定的飞书云盘并写回 URL
+
+先运行 `node "<Skill目录>/scripts/report-targets.mjs" get-folder`，从 `~/.opencli/moka-config.json` 取得已验证格式的 `folderToken` 和 `folderUrl`。缺失、格式错误或与 Base 不同租户时**停止上传并报告配置错误**，不得使用旧目录、根目录或临时创建目录。对目标文件夹做真实元数据查询；目录不可访问或无上传权限时不换目录，汇报权限阻断。
+
+再从**本次导出 JSON 顶层**读取非空的 `面试安排HR`（Moka 登录账号姓名），为本次任务解析一次 owner：优先用括号内中文名作为 `contact +search-user --query <中文名> --as user --format json` 的查询词，无中文名或中文名搜索无结果时用英文别名/原文补查；若返回 `has_more`，继续分页直到全部获取，合并去重候选人。将完整搜索结果中的 `users`、`has_more:false` 保存为工作目录里的小 JSON，不包含逐字稿或凭据，执行：
+
+```text
+node "<Skill目录>/scripts/report-targets.mjs" resolve-owner --name "<本次JSON顶层面试安排HR>" --contacts "<完整搜索结果JSON绝对路径>"
+```
+
+只使用返回的唯一 `openId`。辅助脚本按完整姓名、括号内中文名与英文别名交叉核对；同名多人、结果未拉全、找不到或权限错误均**不得取第一条、猜 ID、复用上次的 owner 或改用面试官/飞书当前用户**。解析失败不影响已通过校验的 HTML 上传及其真实 URL 写回，但本次每份报告均记为 owner 未转移并汇报原因；不得声称端到端成功。
 
 对每条已通过原版校验的 HTML：
 
-- 使用 lark-cli **user 身份**上传到固定 folder token `NY5IfFoh5lQmIaddwoSc6oJznBc`。先确认当前用户具有 Drive 上传权限；缺少 Drive scope 时中断并汇报“飞书 Drive 授权失效，需要在首次配置入口补充 Drive 用户授权”，定时任务中不得发起交互授权。
-- 用 `drive +upload` 上传本地 HTML。因 lark-cli 文件参数只允许 cwd 内的相对路径，先将 cwd 切换到报告文件所在目录，再传 `--file ./面试复盘报告-<面试官>-<候选人>.html --folder-token NY5IfFoh5lQmIaddwoSc6oJznBc --as user`。逐份**串行**上传到同一目录，不并发上传。
+- 使用飞书**当前用户身份**上传到本次配置解析出的 `folderToken`。先确认当前身份具有 Drive 上传 scope；缺 scope 时中断并汇报，定时任务中不得交互授权。目标文件夹权限不足时停止后续上传，不改投其他位置。
+- 用 `drive +upload` 上传本地 HTML。因文件参数只允许 cwd 内的相对路径，先将 cwd 切换到报告文件所在目录（宿主若要求工作目录内上传，则先复制已校验 HTML），再传 `--file ./面试复盘报告-<面试官>-<候选人>.html --folder-token <folderToken> --as user`。逐份**串行**上传到同一目录，不并发上传。
 - 仅使用飞书上传成功响应返回的真实、可访问 URL 写入 `record.reviewReportUrl`；绝不拼接或猜测 URL。若响应没有可用 URL，视为上传失败，不写 URL。
-- 上传失败：写 `record.reviewError = "drive upload failed: <简短原因>"`，保留本地 HTML，继续下一条。不得把报告上传到其他目录。
-- **上传成功后立即转移 owner**：每份 HTML 上传成功后，立即调用 `drive permission.members transfer_owner` 把 owner 转给 HR 指定接收人（固定 open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`，即 Julia Tian（田颖），tianying@trip.com）。参数固定：`--params '{"token":"<file_token>","type":"file","remove_old_owner":false,"old_owner_perm":"full_access","need_notification":false}' --data '{"member_type":"openid","member_id":"ou_0f7d6f3c5c579945fae70cb2348e6091"}' --yes --as user`。`remove_old_owner=false` 保留上传者 full_access，`need_notification=false` 不打扰接收人。转移失败不阻塞该条记录（URL 已写入），但在汇报中标注"owner 转移失败"让 HR 手动处理。
+- 上传失败：写 `record.reviewError = "drive upload failed: <简短原因>"`，保留本地 HTML，继续下一条；目标文件夹权限错误视为本次上传阶段阻断。不得把报告上传到其他目录。
+- **上传成功后立即转移 owner 给本次 Moka `面试安排HR`**：使用本次唯一匹配的飞书 `openId` 与上传响应中的真实 `file_token`，调用 `drive permission.members transfer_owner --params '{"token":"<file_token>","type":"file","remove_old_owner":false,"old_owner_perm":"full_access","need_notification":false}' --data '{"member_type":"openid","member_id":"<本次HR的openId>"}' --yes --as user`。不要用 Base 面试官人员列、结构化 `interviewerNames` 或固定历史 open_id。`remove_old_owner=false` 保留上传者权限；`need_notification=false` 不打扰接收人。转移后回读该文件的 metadata，核对真实 owner_id 等于该 openId；接口成功但回读不符仍算失败。失败不抹掉已取得的 URL、不重复上传，但逐份标注 owner 转移失败及原因，让 HR 手动处理。
 
 所有 record 处理完成后，把扩充了 `reviewScores` / `reviewReportUrl` / (可选)`reviewError` 的 records **只重写一次** 到 `<绝对输出路径>`；顶层 `generatedAt` / `面试安排HR` / `source` / `errors` / `stats` 保留原值。不得在报告后处理阶段丢失或改写 `面试安排HR`。
 
@@ -526,7 +553,8 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 最后汇报:
 
 - 今日全量导出是否成功、合并后总条数，以及因「是否已通知=是」预筛跳过数
-- 本次评分成功/失败/跳过的记录数，HTML Drive 上传成功/失败数
+- 本次评分成功/失败/跳过的记录数
+- 本次 HTML 实际上传目录 URL、上传成功/失败数，以及 owner 转移成功/失败/未解析数；失败列出面试安排 HR 姓名与简短原因，不输出 open_id
 - 新增面试记录数、batch-create 是否降级
 - 去重结果: 面试转写表删除数/失败数
 - 面试官(人员)回填结果: `backfilled` / `skipped` / `failed`,若有 `unresolvedNames` 逐个列出(仅姓名,不带 open_id)
@@ -547,10 +575,10 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 3. 执行一次 `opencli moka export-transcripts --offline --output "<PATH>" --overwrite -f json`，取得今日全量 JSON。导出后确认顶层 `面试安排HR` 非空。
 4. 先运行 `filter-notified-records.mjs`，仅保留 Base 中不存在相同「申请ID + 面试ID」且「是否已通知=是」历史行的 records；预筛失败立即中断。
 5. 遍历预筛后的 records，严格执行 `interviewer-review` 的“统计 → analysis.json → 原版渲染 → 原版校验”流程；不通过校验的记录不得上传或回填 URL。
-6. 按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到固定 Drive folder，并把飞书真实 URL 写回同一条 record。
+6. 读取配置中的报告文件夹 URL 并验证目标；根据本次顶层 `面试安排HR` 查询飞书通讯录且唯一匹配 owner。按 record 串行将通过校验的 `面试复盘报告-<面试官>-<候选人>.html` 上传到该目录，把真实 URL 写回同一条 record，并立即转移每份文件 owner 给本次面试安排 HR、回读核验。
 7. 仅在所有 record 完成上述处理后，调用一次 `sync-lark-base.mjs`，然后 `deduplicate-lark-base.mjs`，最后以同一 JSON 路径调用 `backfill-interviewer-user.mjs --input "<PATH>"`；最后一步分别回填面试官人员与面试安排 HR 人员。
 
-**成功判定**：导出、报告校验、每份 Drive 上传、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告或上传失败不阻断其他记录，但必须在汇总中体现。
+**成功判定**：导出、报告校验、每份 Drive 上传、每份文件 owner 转移与回读、sync、dedup、人员回填均须分别判断；其中报告必须以原版 `validate_report.py` 退出码 0 为准，上传必须取得飞书返回的真实 URL。没有今日记录不算失败；单条报告、上传或 owner 转移失败不阻断其他记录，但必须在汇总中体现。
 
 ## 错误速查表(先查表,不要瞎猜)
 
@@ -590,7 +618,10 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 | 校验报"badge_line 必须为 20–35 字" | `badge_line` 超长或过短 | 精简到 20-35 个中文字符（不含 `<em>` 标签） |
 | 校验报"改进项 N 的开场证据必须包含面试官第一轮原话" | `opening_boundary` 改进项的 `evidence_turn_indices` 没包含 turn_index=面试官第一轮 | 必须在证据里加上面试官第一轮的 `turn_index`，可以再补一个前 3 轮内的其他轮次 |
 | 校验报"改进项 N 评价收尾，evidence_basis 必须是 closing_boundary" | 改进项引用了收尾区域轮次但 `evidence_basis` 写成了 `direct` | 改为 `closing_boundary`，且 `single_event:true`，证据用面试官最后一轮原话 |
-| Drive 上传失败或缺少 scope | lark-cli 用户身份没有 Drive 上传权限，或目标目录无权限 | 中断后续写入并汇报，需要 HR 在首次配置入口补充 Drive 用户授权；定时任务不弹授权二维码 |
+| 配置缺少 `report_folder_url` 或 URL 不是当前租户的 Drive folder | 未选择报告目录/复制了文件、Wiki 或跨租户链接 | 中断上传并请 HR 在普通配置入口重新指定；绝不回退旧目录 |
+| Drive 上传失败或缺少 scope | 当前飞书用户身份没有 Drive 上传权限，或用户指定目录未授予编辑权限 | 中断本次上传阶段并汇报，需 HR 补充用户授权或联系目录所有者授予编辑权限；定时任务不弹授权二维码、不换目标目录 |
+| Moka `面试安排HR` 的飞书搜索无唯一匹配 | 通讯录同名/别名冲突、查不到或查询分页不完整 | 不猜 open_id、不改成面试官或历史接收人；保留已上传真实 URL，每份标记 owner 未转移 |
+| owner 转移返回成功但回读文件 owner 不符 | 接口响应不足以证明转移已生效 | 视为 owner 转移失败单独汇报，保留文件 URL，不重复上传 |
 | 上传响应没有真实 URL | 上传结果不完整或 Agent 未能提取可访问链接 | 视为该条失败，保留本地 HTML，不猜测或拼接 URL |
 
 ### Base 写入阶段(最容易掉链子)
@@ -609,7 +640,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 
 | 现象 | 根因 | 处置 |
 |---|---|---|
-| 用 lark-cli 内联 JSON 写 Base 字段时 field_not_found | Windows 命令行 UTF-8 传参编码链条太脆 | **禁止 Agent 直接调 lark-cli 写 Base 数据或删除记录**；只调 skill 提供的 `.mjs` 脚本。唯一例外是本流程规定的 `drive +upload`，它只传 ASCII 文件名和 folder token，不传中文 JSON 字段 |
+| 用 lark-cli 内联 JSON 写 Base 字段时 field_not_found | Windows 命令行 UTF-8 传参编码链条太脆 | **禁止 Agent 直接调 lark-cli 写 Base 数据或删除记录**；只调 skill 提供的 `.mjs` 脚本。报告上传与 owner 转移按后处理-2 的飞书命令执行，参数中的 JSON 结构需保持正确编码 |
 | Python `subprocess.run(lark_cli, encoding='utf-8')` stdout 是空的 | lark-cli 输出是 GBK,Python 强解 UTF-8 报错并把 stdout 吞了 | 别自己起 Python 调 lark-cli;直接调本 skill 的 `.mjs`(内部用 `spawn` + `setEncoding('utf8')` 已经处理) |
 | `backfill-interviewer-user.mjs` 的 `search-user` 报 `positional arguments are not supported` | 姓名格式 `Iris Cheng （程冬芳）` 中的空格被 lark-cli 拆成位置参数 | **已修复**:脚本从括号中提取中文名搜索,不再用完整姓名 |
 | `backfill-interviewer-user.mjs` 的 `record-upsert` 报 `invalid character 'é'` | Windows `spawn` + `shell:true` 经 cmd.exe 编码链路,中文字段名 `面试官 (人员 )` 被转成 GBK | **已修复**:脚本对所有 JSON payload 强制走 `@file` 模式 |
@@ -629,7 +660,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 - [ ] 已确认 `interviewer-review` skill 可访问；只用其原版统计、渲染、校验与模板，不使用旧 Moka HTML 生成器。
 - [ ] 导出 JSON 顶层 `面试安排HR` 非空，且报告处理后仍原样保留；不得从面试官或逐字稿推断该值。
 - [ ] 已在报告前运行 `filter-notified-records.mjs`；仅将 `remainingRecords` 交给后续链路。任何同「申请ID + 面试ID」且 Base「是否已通知=是」的 record 必须完全跳过。
-- [ ] HTML 仅在原版校验通过后，使用 lark-cli user 身份串行上传至固定 Drive 目录；只接受上传响应返回的真实 URL。上传成功后立即转移 owner 给 Julia Tian（open_id: `ou_0f7d6f3c5c579945fae70cb2348e6091`）。
+- [ ] HTML 仅在原版校验通过后，使用当前飞书用户身份串行上传至用户配置且已核对的 Drive 文件夹；只接受上传响应返回的真实 URL。上传成功后立即转移 owner 给本次导出顶层 `面试安排HR` 唯一匹配的飞书用户，并回读验证 owner；不可使用面试官或固定 open_id。
 - [ ] Windows 上已 `chcp 65001`,Python 子进程环境含 `PYTHONIOENCODING=utf-8`。Windows 上用 `python` 而非 `python3`。
 - [ ] **禁止用 PowerShell `>` 或 `Set-Content -Encoding UTF8` 保存 Python stdout 生成的 JSON**（会加 BOM）；用 Python 子进程 `capture_output` + `open('w',encoding='utf-8')` 或 Node.js `fs.writeFileSync('utf-8')`。
 - [ ] **禁止用 PowerShell `&&`**；用 `;` 或 `if ($?)` 替代。
@@ -664,7 +695,7 @@ node "<Skill目录>/scripts/backfill-interviewer-user.mjs" --input "<绝对输�
 - 只访问当前登录账号有权查看的数据。
 - 不使用 mitmproxy 完成日常采集；不要求用户提供抓包或凭证。
 - 不把 JSON 数据文件写进插件仓库或 Skill 目录。
-- 候选人结构化数据只写入本 Skill 固定配置的飞书 Base；最终校验通过的 HTML 仅上传到固定 Drive folder `NY5IfFoh5lQmIaddwoSc6oJznBc`，不上传或发送到其他位置。
+- 候选人结构化数据只写入本 Skill 配置的飞书 Base；最终校验通过的 HTML 仅上传到用户在 `report_folder_url` 指定且当前身份可访问的 Drive folder，不上传或发送到其他位置。
 - 对话汇报、自动化摘要、错误信息和调试日志中**不要输出**手机号、邮箱、身份证号或逐字稿正文。候选人及面试官**姓名可直接原文使用**——数据源是授权 HR 采集,姓名不做处理。
 - 不因定时任务失败而重新安装工具、删除 Chrome Profile、删除飞书记录或清空 Base。
 - 不直接重试脚本内部失败的写入操作；重新运行整个脚本即可。

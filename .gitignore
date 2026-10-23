@@ -7,3 +7,4 @@ download/
 skills/*.zip
 agents/
 .agents/
+.ego/
