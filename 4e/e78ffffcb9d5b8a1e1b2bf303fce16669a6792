@@ -1,0 +1,60 @@
+skills/moka-transcriptv2/scripts/report-targets.mjs
+  s_01a7dc37371d98::t_f310536e208c1e 40,44
+  s_01a7dc37371d98::t_fa176418756529 93-95,97
+  s_01a7dc37371d98::t_dc77867e0526ea 1-39,41-43,45-68,71-74,79-81,83,85-92,96,98-108
+  s_01a7dc37371d98::t_801784de5a2e51 69-70,75-78,82,84
+skills/moka-transcriptv2/SKILL.md
+  s_01a7dc37371d98::t_7da04763abb123 66
+  s_01a7dc37371d98::t_fe6b39ed1fcfcd 51
+  s_01a7dc37371d98::t_7cced77657544d 49
+  s_01a7dc37371d98::t_802b3ec018bb59 621-624
+  s_01a7dc37371d98::t_0d4e6161c94501 204,206-209,211-212,219-220,225
+  s_01a7dc37371d98::t_9a1981ee0897a6 438
+  s_01a7dc37371d98::t_1ff8f0ee3affdc 663
+  s_01a7dc37371d98::t_0faa3d153da281 557
+  s_01a7dc37371d98::t_07b4e6b2338eed 307
+  s_01a7dc37371d98::t_e4f9ecf9ec28ce 434-437,439-444,448-449,451-452
+  s_01a7dc37371d98::t_9ba335de341dbf 698
+  s_01a7dc37371d98::t_b580e61c0f6b6d 303
+  s_01a7dc37371d98::t_62f676b71b3c14 578
+  s_01a7dc37371d98::t_c33f74e0c4f81a 216
+  s_01a7dc37371d98::t_a4c8ea61a26f5b 556
+  s_01a7dc37371d98::t_87710c8d3ed40a 210,213-215,217-218
+  s_01a7dc37371d98::t_3981b6df83b7ff 57,59-61,64
+  s_01a7dc37371d98::t_f9b082e774b7db 223
+  s_01a7dc37371d98::t_c9a785fa632ff4 581
+  s_01a7dc37371d98::t_4edf337546fc90 42-43
+  s_01a7dc37371d98::t_644f6f55e30ac7 643
+.gitignore
+  h_3279bd1d34f6be 10
+tests/report-targets.test.ts
+  s_01a7dc37371d98::t_992bd6adf3a9c1 25-35
+  s_01a7dc37371d98::t_3a2e03ed03632e 1-24,36-57,67-74,76-80,82-100,113-120,122-126,129-130
+  s_01a7dc37371d98::t_7ef0fdda365b11 81
+  s_01a7dc37371d98::t_8ff34591efca8c 127-128
+  s_01a7dc37371d98::t_9e7c61d3101484 58-66
+  s_01a7dc37371d98::t_1db63ffdb0d266 101-112
+  s_01a7dc37371d98::t_50b3b45d0a6756 75
+  s_01a7dc37371d98::t_69c4f08b655d90 121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "4ee78ffffcb9d5b8a1e1b2bf303fce16669a6792",
+  "prompts": {},
+  "humans": {
+    "h_3279bd1d34f6be": {
+      "author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  },
+  "sessions": {
+    "s_01a7dc37371d98": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_t33sgrttbxtq",
+        "model": "gpt-6-sol-2026-09-22"
+      },
+      "human_author": "Jingbo Ma （马靖博） <jingboma@trip.com>"
+    }
+  }
+}
